@@ -1,5 +1,5 @@
 import { COLOR_PRESETS, COLOR_KEYS, MOTIONS, OVERLAYS, prepareFrame, drawFrame } from './image-fx.js';
-import { exportGif, seekVideo } from './gif.js';
+import { exportGif, seekVideo, measureFrames } from './gif.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -17,7 +17,7 @@ const DEFAULTS = () => ({
   stamp: { on: false, text: todayStamp() },
   text: { content: '', font: '"Noto Sans KR", sans-serif', pos: 'bottom', align: 'center', anim: 'none', size: 72, color: '#ffffff', shadow: true },
   clip: { start: 0, end: null, speed: 1, dir: 'fwd' },
-  out: { ratio: 'video', res: 480, fps: 15, colors: 256, dither: 0.6, palette: 'frame', loop: 0, vfadeIn: 0, vfadeOut: 0, name: '' },
+  out: { ratio: 'video', res: 480, fps: 15, colors: 256, dither: 0.6, palette: 'frame', loop: 0, vfadeIn: 0, vfadeOut: 0, name: '', maxMB: 0 },
 });
 const KEY = 'seol-gif-v1';
 let S = DEFAULTS();
@@ -27,7 +27,7 @@ try {
   S.clip.start = 0; S.clip.end = null; // 영상마다 다르니 구간은 기억하지 않음
 } catch { /* 무시 */ }
 let saveT = 0;
-const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* 무시 */ } }, 300); };
+const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* 무시 */ } }, 300); scheduleEstimate(); };
 
 const vid = $('#vid');
 const media = { ok: false, url: '', name: '', w: 0, h: 0, dur: 0, id: 0, strip: null };
@@ -118,6 +118,7 @@ function settingsChangedTiming() {
   player.pos = Math.min(player.pos, totalDur());
   if (player.playing) seek(player.pos); else parkVideo();
   updateTrimUI();
+  scheduleEstimate();
 }
 
 // ───────── 영상 넣기 ─────────
@@ -164,6 +165,7 @@ function videoChanged() {
   updateTrimUI();
   sizeCanvas();
   parkVideo();
+  scheduleEstimate();
 }
 
 // 구간 고르기용 필름 띠
@@ -236,7 +238,7 @@ function sizeCanvas() {
   pv.style.width = dw + 'px'; pv.style.height = dh + 'px';
   const q = Math.min(Math.min(2, devicePixelRatio || 1), 600 / Math.min(dw, dh));
   pv.width = Math.round(dw * q); pv.height = Math.round(dh * q);
-  $('#hero-s').textContent = `${W}×${H} · ${S.out.fps}fps`;
+  showEstimate();
   renderSummary();
   redraw();
 }
@@ -326,6 +328,7 @@ function syncChips() {
   $$('#fit-chips button').forEach((b) => b.classList.toggle('on', b.dataset.fit === S.photo.fit));
   $$('#speed-chips button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === S.clip.speed));
   $$('#dir-chips button').forEach((b) => b.classList.toggle('on', b.dataset.dir === S.clip.dir));
+  $$('#max-chips button').forEach((b) => b.classList.toggle('on', +b.dataset.mb === (+S.out.maxMB || 0)));
   $$('[data-show=contain]').forEach((e) => (e.hidden = S.photo.fit !== 'contain'));
   $$('[data-show=bgcolor]').forEach((e) => (e.hidden = S.photo.bg !== 'color'));
   $$('#color-presets button').forEach((b) => b.classList.toggle('on', b.dataset.p === S.color.preset));
@@ -338,7 +341,7 @@ for (const el of $$('[data-k]')) {
     const k = el.dataset.k;
     let v;
     if (el.type === 'checkbox') v = el.checked;
-    else if (el.type === 'range' || NUM_KEYS.includes(k)) v = parseFloat(el.value);
+    else if (el.type === 'range' || el.type === 'number' || NUM_KEYS.includes(k)) v = Math.max(0, parseFloat(el.value) || 0);
     else v = el.value;
     setK(k, v);
     if (el.hasAttribute('data-color')) S.color.preset = 'custom';
@@ -368,6 +371,7 @@ $$('#ratio-seg button').forEach((b) => (b.onclick = () => { S.out.ratio = b.data
 $$('#fit-chips button').forEach((b) => (b.onclick = () => { S.photo.fit = b.dataset.fit; syncInputs(); redraw(); save(); }));
 $$('#speed-chips button').forEach((b) => (b.onclick = () => { S.clip.speed = +b.dataset.speed; syncInputs(); settingsChangedTiming(); save(); }));
 $$('#dir-chips button').forEach((b) => (b.onclick = () => { S.clip.dir = b.dataset.dir; syncInputs(); settingsChangedTiming(); save(); }));
+$$('#max-chips button').forEach((b) => (b.onclick = () => { S.out.maxMB = +b.dataset.mb; syncInputs(); save(); }));
 
 // ───────── 필터 프리셋 ─────────
 let thumbKey = null;
@@ -566,43 +570,225 @@ addEventListener('keydown', (e) => {
 let rsT = 0;
 addEventListener('resize', () => { clearTimeout(rsT); rsT = setTimeout(sizeCanvas, 100); });
 
+// ───────── 용량 예상 · 목표 용량 맞추기 ─────────
+const MB = 1048576;
+const fmtMB = (b) => `${(b / MB).toFixed(b < MB ? 2 : 1)}MB`;
+const RES_STEPS = [720, 640, 560, 480, 400, 360, 320, 280, 240, 200, 160, 120];
+const FPS_STEPS = [25, 20, 15, 12, 10, 8, 6, 5];
+const COL_STEPS = [256, 128, 64, 32, 16];
+const SAMPLES = 4;
+const est = { ver: 0, sig: '', busy: false, cur: 0, fit: null, key: '', samples: null, ev: null, evId: -1 };
+const basePlan = () => ({ res: +S.out.res, fps: +S.out.fps, colors: +S.out.colors, dither: +S.out.dither });
+const targetBytes = () => (+S.out.maxMB > 0 ? +S.out.maxMB * MB : 0);
+const planFrames = (fps) => Math.max(1, Math.round(totalDur() * fps));
+const planText = (p) => { const { W, H } = outSize(p.res); return `${W}×${H} · ${p.fps}fps · ${p.colors}색${p.dither ? '' : ' · 디더링 끔'}`; };
+function stateSig() {
+  const { tab, ...rest } = S;
+  return JSON.stringify([media.id, rest, { ...S.out, name: '' }]);
+}
+
+/** 영상에서 미리 몇 장만 꺼내 두기 (설정을 바꿔도 다시 꺼내지 않음) */
+async function getSamples() {
+  const { a, b } = clipRange();
+  const key = [media.id, a.toFixed(2), b.toFixed(2), S.clip.speed, S.clip.dir].join('|');
+  if (est.key === key && est.samples) return est.samples;
+  if (est.evId !== media.id) {
+    const ev = document.createElement('video');
+    ev.muted = true; ev.playsInline = true; ev.preload = 'auto'; ev.src = media.url;
+    await new Promise((r, j) => { ev.onloadeddata = r; ev.onerror = j; });
+    est.ev = ev; est.evId = media.id;
+  }
+  const dur = totalDur(), sc = Math.min(1, 1280 / Math.max(media.w, media.h));
+  const out = [];
+  for (let k = 0; k < SAMPLES; k++) {
+    const t = ((k + 0.5) * dur) / SAMPLES;
+    await seekVideo(est.ev, vtime(t));
+    const c = document.createElement('canvas');
+    c.width = Math.round(media.w * sc); c.height = Math.round(media.h * sc);
+    c.getContext('2d').drawImage(est.ev, 0, 0, c.width, c.height);
+    out.push({ t, c });
+  }
+  est.key = key; est.samples = out;
+  return out;
+}
+
+/** 샘플을 실제로 그리고 GIF로 묶어 본 프레임당 바이트 */
+async function perFrameBytes(p, samples, memo) {
+  const mk = `${p.res}|${p.colors}|${p.dither}`;
+  if (memo.has(mk)) return memo.get(mk);
+  const { W, H } = outSize(p.res);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d', { willReadFrequently: true, alpha: false });
+  const sc = scene(totalDur()), color = colorVals(), datas = [];
+  for (const s of samples) {
+    const img = prepareFrame(s.c, s.c.width, s.c.height, color, W, H, 'est');
+    drawFrame(x, W, H, s.t, { ...sc, img }, null);
+    datas.push(x.getImageData(0, 0, W, H).data);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  const v = measureFrames(datas, W, H, { colors: p.colors, dither: p.dither, palette: S.out.palette }) / samples.length;
+  memo.set(mk, v);
+  return v;
+}
+const totalBytes = (per, fps) => 900 + per * planFrames(fps);
+
+function stepDown(p, k) {
+  if (k === 'dither') {
+    if (p.dither > 0.3) { p.dither = 0.3; return true; }
+    if (p.dither > 0) { p.dither = 0; return true; }
+    return false;
+  }
+  const list = k === 'res' ? RES_STEPS : k === 'fps' ? FPS_STEPS : COL_STEPS;
+  const nx = list.find((v) => v < p[k]);
+  if (nx == null) return false;
+  p[k] = nx;
+  return true;
+}
+/** 목표 용량 안에 들어올 때까지 조금씩 줄이기 */
+async function fitPlan(base, target, samples, memo, alive) {
+  const p = { ...base };
+  let bytes = totalBytes(await perFrameBytes(p, samples, memo), p.fps);
+  const order = ['dither', 'res', 'fps', 'res', 'colors', 'dither', 'res', 'fps', 'res', 'colors'];
+  let i = 0;
+  while (bytes > target) {
+    if (!alive()) return null;
+    let changed = false;
+    for (let j = 0; j < order.length && !changed; j++) {
+      const k = order[(i + j) % order.length];
+      if (stepDown(p, k)) { changed = true; i = (i + j + 1) % order.length; }
+    }
+    if (!changed) break;
+    bytes = totalBytes(await perFrameBytes(p, samples, memo), p.fps);
+  }
+  return { p, bytes, ok: bytes <= target };
+}
+
+let estT = 0;
+function scheduleEstimate() {
+  if (exporting) return;
+  if (!media.ok) { est.cur = 0; est.fit = null; est.sig = ''; showEstimate(); return; }
+  if (stateSig() === est.sig) return;
+  est.ver++;
+  est.busy = true; showEstimate();
+  clearTimeout(estT);
+  estT = setTimeout(runEstimate, 600);
+}
+async function runEstimate() {
+  if (!media.ok || exporting) return;
+  const ver = ++est.ver, sig = stateSig();
+  const alive = () => ver === est.ver && !exporting;
+  est.busy = true; showEstimate();
+  try {
+    const samples = await getSamples();
+    if (!alive()) return;
+    const memo = new Map(), base = basePlan();
+    est.cur = totalBytes(await perFrameBytes(base, samples, memo), base.fps);
+    est.fit = null;
+    const target = targetBytes();
+    if (target && est.cur > target) {
+      showEstimate();
+      const r = await fitPlan(base, target, samples, memo, alive);
+      if (!r || !alive()) return;
+      est.fit = r;
+    }
+    if (!alive()) return;
+    est.busy = false; est.sig = sig;
+    showEstimate();
+  } catch (e) { console.warn(e); if (ver === est.ver) { est.busy = false; showEstimate(); } }
+}
+function showEstimate() {
+  const { W, H } = outSize();
+  const box = $('#size-est'), target = targetBytes();
+  const final = est.fit ? est.fit.bytes : est.cur;
+  const sizeTxt = media.ok && est.cur ? ` · 약 ${fmtMB(final)}` : '';
+  $('#hero-s').textContent = `${W}×${H} · ${S.out.fps}fps${est.busy ? ' · 용량 계산 중…' : sizeTxt}`;
+  $('#export-btn2').textContent = media.ok && est.cur && !est.busy ? `GIF 저장 · 약 ${fmtMB(final)}` : 'GIF 저장';
+  if (!box) return;
+  if (!media.ok) { box.innerHTML = '<span class="muted">영상을 넣으면 저장될 용량을 알려드려요.</span>'; return; }
+  if (!est.cur) { box.innerHTML = '<span class="big">계산 중…</span>'; return; }
+  const lines = [`<span class="big">약 ${fmtMB(est.cur)}<small>지금 설정 그대로 저장할 때${est.busy ? ' · 다시 계산 중…' : ''}</small></span>`];
+  if (target) {
+    const tg = `${+S.out.maxMB}MB`;
+    if (est.cur <= target) lines.push(`<span class="ok">✓ 목표 ${tg} 안에 들어와요.</span>`);
+    else if (est.fit && est.fit.ok) lines.push(`목표 ${tg}에 맞추면 <b>약 ${fmtMB(est.fit.bytes)}</b><br>${planText(est.fit.p)}`);
+    else if (est.fit) lines.push(`<span class="warn">가장 작게 줄여도 약 ${fmtMB(est.fit.bytes)}예요. 구간을 더 짧게 잘라주세요.</span>`);
+    else lines.push('목표에 맞추는 방법을 찾는 중…');
+  }
+  box.innerHTML = lines.join('<br>');
+}
+
 // ───────── GIF 저장 ─────────
 let exporting = null;
 async function doExport() {
   if (!media.ok) { toast('먼저 영상을 넣어주세요.'); setTab('video'); return; }
-  const fps = +S.out.fps, dur = totalDur();
-  const N = Math.max(1, Math.round(dur * fps));
-  if (N > 450 && !confirm(`프레임이 ${N}장이라 오래 걸리고 파일이 아주 커질 수 있어요.\n구간을 줄이거나 초당 프레임을 낮추는 걸 추천해요. 그래도 만들까요?`)) return;
+  const dur = totalDur();
+  const target = targetBytes();
   if (player.playing) pause();
+  clearTimeout(estT); est.ver++;
   const ctrl = new AbortController();
   exporting = ctrl;
+  const alive = () => !ctrl.signal.aborted;
   const bar = $('#exp-bar'), label = $('#exp-label');
   $('#exp-title').textContent = 'GIF 만드는 중';
   $('#exp-run').hidden = false; $('#exp-done').hidden = true;
   bar.style.width = '0%'; label.textContent = '준비 중…';
   openModal('#exp-modal');
-  const prog = (p, l) => { bar.style.width = `${Math.round(p * 100)}%`; if (l) label.textContent = l; };
   const t0 = performance.now();
   try {
     await Promise.all([document.fonts.load(`700 40px ${S.text.font}`), document.fonts.load('700 40px "VT323"')]).catch(() => {});
-    const { W, H } = outSize();
+    let plan = basePlan(), guess = 0;
+    const memo = new Map();
+    label.textContent = target ? `목표 ${+S.out.maxMB}MB에 맞추는 중…` : '용량 계산 중…';
+    const samples = await getSamples();
+    if (!alive()) throw new DOMException('취소됨', 'AbortError');
+    if (target) {
+      const r = await fitPlan(plan, target, samples, memo, alive);
+      if (!r) throw new DOMException('취소됨', 'AbortError');
+      plan = r.p; guess = r.bytes;
+    } else guess = totalBytes(await perFrameBytes(plan, samples, memo), plan.fps);
+
+    const N0 = planFrames(plan.fps);
+    if (N0 > 450 && !confirm(`프레임이 ${N0}장이라 오래 걸리고 파일이 커질 수 있어요 (약 ${fmtMB(guess)}).\n그래도 만들까요?`)) throw new DOMException('취소됨', 'AbortError');
+
     const sc = scene(dur), color = colorVals();
-    let img = null;
-    const res = await exportGif({
-      W, H, fps, dur, signal: ctrl.signal,
-      colors: +S.out.colors, dither: +S.out.dither, palette: S.out.palette, loop: +S.out.loop,
-      prepare: async (t) => { await seekVideo(vid, vtime(t)); img = prepareFrame(vid, media.w, media.h, color, W, H, 'export'); },
-      draw: (x, w, h, t) => drawFrame(x, w, h, t, { ...sc, img }, null),
-      onProgress: prog,
-    });
+    let res, W, H, tries = 0;
+    for (;;) {
+      ({ W, H } = outSize(plan.res));
+      let img = null;
+      const g = guess;
+      res = await exportGif({
+        W, H, fps: plan.fps, dur, signal: ctrl.signal,
+        colors: plan.colors, dither: plan.dither, palette: S.out.palette, loop: +S.out.loop,
+        prepare: async (t) => { await seekVideo(vid, vtime(t)); img = prepareFrame(vid, media.w, media.h, color, W, H, 'export'); },
+        draw: (x, w, h, t) => drawFrame(x, w, h, t, { ...sc, img }, null),
+        onProgress: (p, l, bytes) => {
+          bar.style.width = `${Math.round(p * 100)}%`;
+          label.textContent = `${l}${bytes ? ` · 지금 ${fmtMB(bytes)} / 예상 약 ${fmtMB(g)}` : ''}${tries ? ' · 다시 만드는 중' : ''}`;
+        },
+      });
+      // 예상보다 커서 목표를 넘으면, 넘은 만큼 줄여서 다시
+      if (!target || res.blob.size <= target || tries >= 2) break;
+      tries++;
+      const want = plan.res * Math.sqrt(target / res.blob.size) * 0.97;
+      const nr = RES_STEPS.find((v) => v <= want);
+      if (nr && nr < plan.res) plan.res = nr;
+      else if (!stepDown(plan, 'fps') && !stepDown(plan, 'colors')) break;
+      guess = res.blob.size * (target / res.blob.size) * 0.95;
+      label.textContent = `목표보다 ${fmtMB(res.blob.size - target)} 커서 조금 줄여서 다시 만드는 중…`;
+    }
+
     const url = URL.createObjectURL(res.blob);
     const name = `${(S.out.name || 'seol-gif').replace(/[\\/:*?"<>|]+/g, '_')}.gif`;
     const im = $('#exp-img');
     if (im.src.startsWith('blob:')) URL.revokeObjectURL(im.src);
     im.src = url;
+    const size = res.blob.size;
     const a = $('#exp-dl'); a.href = url; a.download = name;
-    a.textContent = `다운로드 (${(res.blob.size / 1048576).toFixed(1)}MB)`;
-    $('#exp-note').textContent = `${W}×${H} · ${fps}fps · ${res.frames}프레임 · ${fmt(dur)} · ${((performance.now() - t0) / 1000).toFixed(1)}초 걸림`;
+    a.textContent = `다운로드 (${fmtMB(size)})`;
+    const tgTxt = target ? (size <= target ? `목표 ${+S.out.maxMB}MB 안에 맞췄어요` : `목표 ${+S.out.maxMB}MB보다 커요 · 구간을 줄여보세요`) : '';
+    $('#exp-size').innerHTML = `${fmtMB(size)}<small>${tgTxt}</small>`;
+    const changed = JSON.stringify(plan) !== JSON.stringify(basePlan());
+    $('#exp-note').textContent = `${planText(plan)} · ${res.frames}프레임 · ${fmt(dur)} · ${((performance.now() - t0) / 1000).toFixed(1)}초 걸림${changed ? ' (용량에 맞춰 줄임)' : ''}`;
     const file = new File([res.blob], name, { type: 'image/gif' });
     const sh = $('#exp-share');
     sh.hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
@@ -616,6 +802,7 @@ async function doExport() {
   } finally {
     exporting = null;
     parkVideo();
+    est.sig = ''; scheduleEstimate();
   }
 }
 $('#export-btn').onclick = doExport;

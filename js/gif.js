@@ -48,6 +48,33 @@ function ditherIndex(rgba, W, H, palette, strength = 1) {
   return out;
 }
 
+/** 한 프레임을 팔레트 번호 배열로 */
+export function indexFrame(d, W, H, pal, dither) {
+  return dither > 0 ? ditherIndex(d, W, H, pal, dither) : applyPalette(d, pal, 'rgb565');
+}
+
+/** 여러 프레임에서 조금씩 모아 공통 팔레트 만들기 */
+export function paletteFrom(datas, W, H, colors) {
+  const step = Math.max(1, Math.floor((W * H * datas.length) / 160000));
+  const per = Math.ceil((W * H) / step);
+  const pool = new Uint8Array(per * datas.length * 4);
+  let n = 0;
+  for (const d of datas) for (let p = 0; p < W * H; p += step) { pool.set(d.subarray(p * 4, p * 4 + 4), n * 4); n++; }
+  return quantize(pool.subarray(0, n * 4), colors, { format: 'rgb565' });
+}
+
+/** 샘플 프레임들을 실제로 GIF로 묶어 본 크기(바이트) — 용량 예상용 */
+export function measureFrames(datas, W, H, o) {
+  const colors = Math.max(2, Math.min(256, o.colors | 0 || 256));
+  const global = o.palette === 'global' ? paletteFrom(datas, W, H, colors) : null;
+  const gif = GIFEncoder();
+  datas.forEach((d, i) => {
+    const pal = global || quantize(d, colors, { format: 'rgb565' });
+    gif.writeFrame(indexFrame(d, W, H, pal, o.dither), W, H, { palette: global && i ? undefined : pal, delay: 66 });
+  });
+  return gif.bytesView().length;
+}
+
 /**
  * @param o.W,o.H 크기
  * @param o.fps 초당 프레임
@@ -58,6 +85,7 @@ function ditherIndex(rgba, W, H, palette, strength = 1) {
  * @param o.dither 0~1 (0이면 끔)
  * @param o.palette 'frame' | 'global'
  * @param o.loop 0 = 무한, -1 = 한 번, n = n번 더
+ * @param o.onProgress (0~1, 문구, 지금까지 바이트)
  */
 export async function exportGif(o) {
   const { W, H, fps, dur, prepare, draw, signal, onProgress = () => {} } = o;
@@ -79,16 +107,12 @@ export async function exportGif(o) {
   // 전체 공통 팔레트: 여러 프레임을 조금씩 모아 한 번만 색을 뽑음
   let global = null;
   if (o.palette === 'global') {
-    const S = Math.min(N, 8), step = Math.max(1, Math.floor((W * H) / 60000));
-    const per = Math.ceil((W * H) / step);
-    const pool = new Uint8Array(per * S * 4);
-    let n = 0;
+    const S = Math.min(N, 8), datas = [];
     for (let k = 0; k < S; k++) {
-      onProgress(0, `색 고르는 중… ${k + 1}/${S}`);
-      const d = await grab(Math.floor((k * N) / S));
-      for (let p = 0; p < W * H; p += step) { pool.set(d.subarray(p * 4, p * 4 + 4), n * 4); n++; }
+      onProgress(0, `색 고르는 중… ${k + 1}/${S}`, 0);
+      datas.push((await grab(Math.floor((k * N) / S))).slice());
     }
-    global = quantize(pool.subarray(0, n * 4), colors, { format: 'rgb565' });
+    global = paletteFrom(datas, W, H, colors);
   }
 
   const gif = GIFEncoder();
@@ -96,9 +120,8 @@ export async function exportGif(o) {
   for (let i = 0; i < N; i++) {
     const d = await grab(i);
     const pal = global || quantize(d, colors, { format: 'rgb565' });
-    const idx = o.dither > 0 ? ditherIndex(d, W, H, pal, o.dither) : applyPalette(d, pal, 'rgb565');
-    gif.writeFrame(idx, W, H, { palette: global && i ? undefined : pal, delay, repeat: o.loop ?? 0, first: i === 0 });
-    onProgress((i + 1) / N, `프레임 ${i + 1} / ${N}`);
+    gif.writeFrame(indexFrame(d, W, H, pal, o.dither), W, H, { palette: global && i ? undefined : pal, delay, repeat: o.loop ?? 0 });
+    onProgress((i + 1) / N, `프레임 ${i + 1} / ${N}`, gif.bytesView().length);
     if (i % 4 === 3) await tick();
   }
   gif.finish();

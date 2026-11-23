@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEOL GIF</title>
-<meta name="description" content="영상을 잘라 효과를 입히고 GIF로 저장하는 도구">
+<meta name="description" content="SEOL GIF · 영상을 잘라 효과를 입히고 GIF로 저장하는 도구">
+<meta property="og:title" content="SEOL GIF">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23c0d1dc'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='700' font-size='11' text-anchor='middle' fill='%2334495a'%3EGIF%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -210,6 +211,22 @@
     <!-- 저장 -->
     <div data-pane="out">
       <details class="box" open>
+        <summary>파일 크기 <small>정한 용량 안에 맞춰 저장해요</small></summary>
+        <div class="chips" id="max-chips">
+          <button data-mb="0">제한 없음</button>
+          <button data-mb="1">1MB</button>
+          <button data-mb="2">2MB</button>
+          <button data-mb="3">3MB</button>
+          <button data-mb="5">5MB</button>
+          <button data-mb="8">8MB</button>
+          <button data-mb="10">10MB</button>
+          <button data-mb="15">15MB</button>
+        </div>
+        <label class="f">직접 입력 (MB)<input type="number" min="0" max="200" step="0.1" inputmode="decimal" data-k="out.maxMB" placeholder="0 = 제한 없음"></label>
+        <div class="size-est" id="size-est"></div>
+        <p class="muted">목표보다 크면 디더링 → 크기 → 초당 프레임 → 색 수 순서로 조금씩 줄여서 맞춰요. 아래 설정은 그대로 두고 저장할 때만 줄여요.</p>
+      </details>
+      <details class="box" open>
         <summary>GIF 설정</summary>
         <label class="f">화면 비율
           <select data-k="out.ratio">
@@ -292,6 +309,7 @@
     </div>
     <div id="exp-done" hidden>
       <img id="exp-img" class="exp-img" alt="만든 GIF">
+      <p class="exp-size" id="exp-size"></p>
       <p class="muted" id="exp-note"></p>
       <div class="btn-row">
         <a class="btn primary" id="exp-dl" download>다운로드</a>
