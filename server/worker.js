@@ -4,8 +4,9 @@
 // 이 서버가 토큰을 비밀(Secret)로 갖고 있다가, 페이지 대신 Google Vertex AI(Veo)를 불러요.
 //
 // 설정 (Cloudflare 대시보드 → Worker → Settings → Variables and Secrets)
-//   GCP_SA_KEY      (Secret) 서비스 계정 키 JSON 전체.  ← 추천. 서버가 1시간짜리 토큰을 알아서 새로 받아요.
-//   VERTEX_API_KEY  (Secret) 또는 Vertex AI API 키.     ← GCP_SA_KEY가 없을 때만 씀
+//   VERTEX_API_KEY  (Secret) Vertex AI API 키. promm의 AI 채팅 Worker(cloudflare/*-worker.js)에 넣은 것과 같은 키.
+//                            그 Worker들처럼 aiplatform.googleapis.com 에 x-goog-api-key 헤더로 보냄.
+//   GCP_SA_KEY      (Secret) 또는 서비스 계정 키 JSON 전체. 있으면 이쪽을 먼저 씀 (API 키로 Veo가 안 될 때 대안)
 //   ACCESS_CODE     (Secret) 접속 코드. 정해두면 이 코드를 아는 사람만 영상을 만들 수 있어요. (강력 추천: 영상 만들 때마다 요금이 나와요)
 //   GCP_PROJECT     (Text)   프로젝트 ID. 비우면 서비스 계정 키 안의 project_id를 씀
 //   GCP_LOCATION    (Text)   지역. 기본 us-central1
@@ -35,6 +36,7 @@ export default {
     try {
       if (url.pathname === '/health' && request.method === 'GET') {
         const auth = env.GCP_SA_KEY ? 'service-account' : env.VERTEX_API_KEY ? 'api-key' : 'none';
+        // (키 값 자체는 절대 돌려주지 않음)
         return json({
           ok: auth !== 'none',
           auth,
@@ -67,7 +69,7 @@ export default {
         // 작업 번호가 이 프로젝트 · 모델 것인지 확인
         const j = await request.json().catch(() => ({}));
         const op = String(j.operationName || '');
-        if (!new RegExp(`/publishers/google/models/${escapeRe(model)}/operations/[^/]+$`).test(op) || (project && !op.startsWith(`projects/${project}/`))) {
+        if (!new RegExp(`(^|/)publishers/google/models/${escapeRe(model)}/operations/[^/]+$`).test(op) || (project && env.GCP_SA_KEY && !op.startsWith(`projects/${project}/`))) {
           return json({ error: { message: '작업 번호가 올바르지 않아요.' } }, 400, cors);
         }
         body = JSON.stringify({ operationName: op });
@@ -84,6 +86,13 @@ export default {
       // 결과(영상 base64)가 크니까 읽지 않고 그대로 흘려보냄
       const out = new Headers(cors);
       out.set('Content-Type', r.headers.get('Content-Type') || 'application/json');
+      if ((r.status === 401 || r.status === 403) && !env.GCP_SA_KEY) {
+        // API 키로 Veo가 막힐 때: 원인을 알기 쉽게
+        const t = await r.text();
+        let msg = t.slice(0, 400);
+        try { msg = JSON.parse(t).error.message || msg; } catch { /* 무시 */ }
+        return json({ error: { code: 'VERTEX_AUTH', message: `Google이 API 키 요청을 거절했어요 (${r.status}): ${msg}\n이 키로 Veo(영상)를 쓸 수 없다면 서버에 GCP_SA_KEY(서비스 계정 키)를 넣어주세요.` } }, r.status, cors);
+      }
       return new Response(r.body, { status: r.status, headers: out });
     } catch (e) {
       return json({ error: { message: `서버 오류: ${e && e.message ? e.message : e}` } }, 500, cors);
