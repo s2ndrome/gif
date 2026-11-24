@@ -6,6 +6,12 @@
 
 ## 기능
 
+- **AI 영상** (그림 한 장 → 움직이는 영상, Google Vertex AI · Veo)
+  - 그림 넣기(고르기 · 끌어다 놓기 · 붙여넣기), 움직임 문구 버튼(머리카락 · 옷자락 · 줌인 · 눈 · 꽃잎 …) + 프롬프트 직접 쓰기
+  - 모델 Veo 3.1 Fast / Veo 3.1 (직접 입력 가능), 4 · 6 · 8초, 16:9 · 9:16(그림에 맞춰 자동), 720p · 1080p, 소리, 시드
+  - 완성되면 MP4 다운로드 또는 **바로 GIF 만들기로 넘기기**
+  - 연결: 프로젝트 ID + 지역 + 액세스 토큰(`gcloud auth print-access-token`, 1시간 유효) 또는 API 키
+  - 토큰은 브라우저에서 `aiplatform.googleapis.com`으로만 바로 보내고, 기본은 탭을 닫으면 지워짐(원하면 '기억하기'). 저장소에는 토큰을 넣지 않아요.
 - **영상**
   - 파일 고르기 / 끌어다 놓기 / 붙여넣기(Ctrl+V · ⌘V) — mp4 · mov · webm
   - 필름 띠를 보며 구간 자르기 (1초 / 2초 / 3초 / 5초 / 전체 / 재생 위치부터)
@@ -44,5 +50,6 @@
 - `style.css` – 스타일 (SEOL MP4와 같은 무드)
 - `js/app.js` – 상태, 영상 넣기, 구간·속도·방향, 미리보기
 - `js/image-fx.js` – 필터·움직임·효과 그리기 (미리보기와 저장이 같은 코드)
+- `js/ai-video.js` – AI 영상: Vertex AI Veo 요청(predictLongRunning) · 진행 확인(fetchPredictOperation) · 결과 받기
 - `js/gif.js` – 프레임 꺼내기, 색 줄이기·디더링, GIF 묶기, 용량 측정
 - `vendor/gifenc.js` – GIF 인코더 (MIT, gifenc v1.0.3)

@@ -1,5 +1,6 @@
 import { COLOR_PRESETS, COLOR_KEYS, MOTIONS, OVERLAYS, prepareFrame, drawFrame } from './image-fx.js';
 import { exportGif, seekVideo, measureFrames } from './gif.js';
+import { initAi, setAiImage } from './ai-video.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -356,11 +357,16 @@ for (const el of $$('[data-k]')) {
 
 // 탭
 function setTab(t) {
-  if (!['video', 'look', 'out'].includes(t)) t = 'video';
+  if (!['ai', 'video', 'look', 'out'].includes(t)) t = 'video';
   S.tab = t;
   $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
   $$('.panel [data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t));
-  $('#hero-t').textContent = { video: 'Video', look: 'Effects', out: 'Export' }[t];
+  const ai = t === 'ai';
+  $('#ai-stage').hidden = !ai;
+  $$('.preview > .pv-bar, .preview > .pv-stage, .preview > .player, .preview > .pv-hint, #hero-s').forEach((e) => (e.hidden = ai));
+  if (ai && player.playing) pause();
+  if (!ai) $('#ai-video').pause();
+  $('#hero-t').textContent = { ai: 'AI Video', video: 'Video', look: 'Effects', out: 'Export' }[t];
   if (t === 'look') presetThumbs();
   redraw();
   save();
@@ -485,8 +491,10 @@ const isVideo = (f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|o
 function routeFiles(files) {
   const arr = [...files];
   const v = arr.find(isVideo);
-  if (v) loadVideoFile(v);
-  else if (arr.length) toast(arr.some((f) => f.type.startsWith('image/')) ? '사진이 아니라 영상 파일을 넣어주세요.' : '영상 파일만 넣을 수 있어요.');
+  const im = arr.find((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|avif|bmp)$/i.test(f.name));
+  if (v) { loadVideoFile(v); if (S.tab === 'ai') setTab('video'); }
+  else if (im) { setAiImage(im); if (S.tab !== 'ai') { setTab('ai'); toast('그림은 AI 영상 탭으로 넣었어요. 움직이는 영상으로 만들 수 있어요.'); } }
+  else if (arr.length) toast('영상이나 그림 파일만 넣을 수 있어요.');
 }
 $$('input[type=file][data-pick]').forEach((inp) => inp.addEventListener('change', () => { routeFiles(inp.files); inp.value = ''; }));
 {
@@ -810,6 +818,10 @@ $('#export-btn2').onclick = doExport;
 $('#exp-cancel').onclick = () => exporting && exporting.abort();
 
 // ───────── 시작 ─────────
+initAi({
+  toast,
+  useVideo: (file) => { setTab('video'); loadVideoFile(file); },
+});
 $('#support').textContent = '모든 처리는 이 브라우저 안에서 해요. 저장 시간은 대략 길이 × 초당 프레임에 비례해요.';
 syncInputs();
 setTab(S.tab);
