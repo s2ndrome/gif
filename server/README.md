@@ -39,6 +39,7 @@ promm의 AI 채팅 Worker(`cloudflare/outfit-chat-worker.js` 등)와 **똑같은
 | `ALLOWED_ORIGINS` | Text | GIF 페이지 주소. 예) `https://s2ndrome.github.io` (여러 개면 쉼표로) |
 | `ACCESS_CODE` | **Secret** | (추천) 접속 코드. 정해두면 코드를 아는 사람만 영상을 만들 수 있어요 |
 | `ALLOWED_MODELS` | Text | (선택) 기본 `veo-3.1-fast-generate-001,veo-3.1-generate-001` |
+| `GCP_PROJECT` | Text | **필수 (Veo)** API 키를 만든 Google Cloud 프로젝트 ID. 없으면 Google이 `400 Invalid resource field value` 로 거절해요 |
 
 4. 서버 주소가 나와요: `https://seol-gif-ai.<내이름>.workers.dev`
 5. 확인: 브라우저로 `…workers.dev/health` 를 열어 `"ok":true,"auth":"api-key"` 가 보이면 성공

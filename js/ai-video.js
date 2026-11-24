@@ -121,6 +121,7 @@ async function call(url, body, signal) {
     const msg = j?.error?.message || txt.slice(0, 300) || r.statusText;
     if (r.status === 401 && j?.error?.code === 'ACCESS_CODE') { $('#ai-conn').open = true; $('#ai-code').focus(); throw new Error('접속 코드가 틀렸어요. AI 서버 칸에서 접속 코드를 확인해주세요.'); }
     if (j?.error?.code === 'VERTEX_AUTH') throw new Error(msg);
+    if (r.status === 400 && /Invalid resource field value|RESOURCE_PROJECT_INVALID/i.test(txt)) throw new Error(`Google이 프로젝트를 못 찾았어요 (400).\nCloudflare Worker → Settings → Variables and Secrets에 GCP_PROJECT (Text) = 내 Google Cloud 프로젝트 ID 를 추가해주세요.\n(API 키를 만든 그 프로젝트의 ID예요. 예: my-project-123456)\n${msg}`);
     if (r.status === 401 && useServer()) throw new Error(`서버의 Google 인증이 안 돼요 (401). 서버에 넣은 VERTEX_API_KEY(또는 GCP_SA_KEY)를 확인해주세요.\n${msg}`);
     if (r.status === 401) throw new Error(`인증이 안 돼요 (401). ${A.auth === 'token' ? '액세스 토큰은 1시간이면 만료돼요. 새로 발급해서 넣어주세요.' : 'API 키를 확인해주세요.'}\n${msg}`);
     if (r.status === 403) throw new Error(`권한이 없어요 (403). 프로젝트에서 Vertex AI API가 켜져 있는지, 이 계정에 Vertex AI 사용 권한이 있는지 확인해주세요.\n${msg}`);
