@@ -36,7 +36,7 @@ const CODE_KEY = 'seol-gif-ai-code';
 const DEF = () => ({
   prompt: BASE_PROMPT + 'hair gently flowing in the wind, clothing fabric fluttering softly.',
   neg: 'distorted face, extra limbs, style change, text, watermark',
-  model: AI_MODELS[0].id, dur: 6, aspect: 'auto', res: '720p', audio: false, seed: '',
+  model: AI_MODELS[0].id, dur: 6, aspect: 'auto', fit: 'crop', res: '720p', audio: false, seed: '',
   server: '', project: '', location: 'us-central1', auth: 'token', remember: false,
 });
 
@@ -56,7 +56,7 @@ function storeToken(v) {
   } catch { /* 무시 */ }
 }
 
-const img = { file: null, url: '', w: 0, h: 0, b64: '', mime: '' };
+const img = { file: null, url: '', w: 0, h: 0, el: null };
 const job = { ctrl: null, timer: 0, t0: 0 };
 let result = null; // { blob, url, name }
 let hooks = { toast: (m) => alert(m), useVideo: () => {} };
@@ -67,15 +67,8 @@ export async function setAiImage(file) {
   const url = URL.createObjectURL(file);
   try {
     const im = new Image(); im.src = url; await im.decode();
-    // Veo는 png / jpeg만 받아서, 너무 크면 줄이고 jpeg로 다시 저장
-    const max = 1920, s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
-    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-    x.drawImage(im, 0, 0, c.width, c.height);
-    const data = c.toDataURL('image/jpeg', 0.93);
     if (img.url) URL.revokeObjectURL(img.url);
-    Object.assign(img, { file, url, w: im.naturalWidth, h: im.naturalHeight, b64: data.split(',')[1], mime: 'image/jpeg' });
+    Object.assign(img, { file, url, w: im.naturalWidth, h: im.naturalHeight, el: im });
     $('#ai-img').src = url;
     setView('img');
     $('#ai-img-name').textContent = `🖼 ${file.name} · ${img.w}×${img.h}`;
@@ -87,6 +80,25 @@ export async function setAiImage(file) {
   }
 }
 const autoAspect = () => (img.w && img.h > img.w ? '9:16' : '16:9');
+const targetAspect = () => { const [a, b] = (A.aspect === 'auto' ? autoAspect() : A.aspect).split(':').map(Number); return a / b; };
+
+/** 보낼 그림 만들기. Veo는 16:9 / 9:16만 만들어서, 그림 비율이 다르면 검은 띠를 붙임.
+ *  crop: 그 비율로 가운데를 잘라서 보냄 → 검은 띠 없음
+ *  keep: 그림 전체를 보냄 → 결과의 검은 띠는 미리보기 · GIF에서 잘라냄 */
+function encodeImage() {
+  const iw = img.w, ih = img.h, ta = targetAspect();
+  let sx = 0, sy = 0, sw = iw, sh = ih;
+  if (A.fit === 'crop' && Math.abs(iw / ih - ta) / ta > 0.01) {
+    if (iw / ih > ta) { sw = Math.round(ih * ta); sx = Math.round((iw - sw) / 2); }
+    else { sh = Math.round(iw / ta); sy = Math.round((ih - sh) / 2); }
+  }
+  const s = Math.min(1, 1920 / Math.max(sw, sh)); // Veo는 png / jpeg만 받아서, 너무 크면 줄이고 jpeg로
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * s); c.height = Math.round(sh * s);
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(img.el, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return { b64: c.toDataURL('image/jpeg', 0.93).split(',')[1], mime: 'image/jpeg' };
+}
 function syncAspectHint() {
   const o = $('#ai-aspect option[value=auto]');
   if (o) o.textContent = img.w ? `그림에 맞춰 자동 (${autoAspect()})` : '그림에 맞춰 자동';
@@ -139,7 +151,8 @@ async function call(url, body, signal) {
 }
 
 function requestBody() {
-  const inst = { prompt: A.prompt.trim(), image: { bytesBase64Encoded: img.b64, mimeType: img.mime } };
+  const e = encodeImage();
+  const inst = { prompt: A.prompt.trim(), image: { bytesBase64Encoded: e.b64, mimeType: e.mime } };
   const params = {
     sampleCount: 1,
     durationSeconds: +A.dur,
@@ -163,7 +176,8 @@ const secs = () => Math.round((performance.now() - job.t0) / 1000);
 
 async function generate() {
   if (job.ctrl) { job.ctrl.abort(); return; }
-  if (!img.b64) { hooks.toast('먼저 움직일 그림을 넣어주세요.'); return; }
+  if (!img.el) { hooks.toast('먼저 움직일 그림을 넣어주세요.'); return; }
+  const cropAspect = A.fit === 'keep' ? img.w / img.h : 0; // 이번 결과에서 잘라낼 비율 (보낸 순간 기준)
   if (useServer()) {
     if (serverInfo?.needsCode && !$('#ai-code').value.trim()) { $('#ai-conn').open = true; $('#ai-code').focus(); hooks.toast('접속 코드를 넣어주세요.'); return; }
     storeCode($('#ai-code').value.trim());
@@ -208,7 +222,7 @@ async function generate() {
     const bin = atob(v.bytesBase64Encoded), u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
     const blob = new Blob([u8], { type: v.mimeType && v.mimeType.startsWith('video/') ? v.mimeType : 'video/mp4' });
-    showResult(blob);
+    showResult(blob, cropAspect);
     status(`<span class="big ok">완성!<small>${secs()}초 걸림 · ${(blob.size / 1048576).toFixed(1)}MB</small></span>`, '');
   } catch (e) {
     if (e.name === 'AbortError') status('그만뒀어요. (이미 보낸 요청은 Google 쪽에서 계속 만들어질 수 있어요)');
@@ -220,10 +234,11 @@ async function generate() {
   }
 }
 
-function showResult(blob) {
+function showResult(blob, cropAspect = 0) {
   if (result) URL.revokeObjectURL(result.url);
   const base = (img.file?.name || 'image').replace(/\.[^.]+$/, '');
-  result = { blob, url: URL.createObjectURL(blob), name: `${base}-ai.mp4` };
+  result = { blob, url: URL.createObjectURL(blob), name: `${base}-ai.mp4`, cropAspect };
+  $('#ai-dl-note').hidden = !cropAspect;
   const v = $('#ai-video'); v.src = result.url;
   setView('video');
   v.play().catch(() => {});
@@ -245,6 +260,17 @@ function setView(vw) {
   if (view !== 'video') $('#ai-video').pause();
   $('#ai-view').hidden = !(hasImg && hasVid);
   $$('#ai-view button').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+  fitPreview();
+}
+function fitBox(el, aspect) {
+  if (!aspect) { el.style.width = el.style.height = el.style.objectFit = ''; return; }
+  const maxW = Math.max(120, Math.min(440, ($('#ai-stage').clientWidth || 440) - 24)), maxH = Math.min(innerHeight * 0.62, 640);
+  const w = Math.min(maxW, maxH * aspect);
+  el.style.width = `${Math.round(w)}px`; el.style.height = `${Math.round(w / aspect)}px`; el.style.objectFit = 'cover';
+}
+function fitPreview() {
+  if (img.w) fitBox($('#ai-img'), A.fit === 'crop' ? targetAspect() : 0);
+  if (result) fitBox($('#ai-video'), result.cropAspect || 0);
 }
 
 // ───────── 화면 연결 ─────────
@@ -310,6 +336,10 @@ export function initAi(h) {
   bind('#ai-neg', 'neg');
   bind('#ai-dur', 'dur', 'change', Number);
   bind('#ai-aspect', 'aspect', 'change');
+  bind('#ai-fit', 'fit', 'change');
+  $('#ai-aspect').addEventListener('change', fitPreview);
+  $('#ai-fit').addEventListener('change', fitPreview);
+  addEventListener('resize', fitPreview);
   bind('#ai-res', 'res', 'change');
   bind('#ai-audio', 'audio', 'change');
   bind('#ai-seed', 'seed');
@@ -392,6 +422,6 @@ export function initAi(h) {
   setView('img');
   $('#ai-to-gif').onclick = () => {
     if (!result) return;
-    hooks.useVideo(new File([result.blob], result.name, { type: result.blob.type }));
+    hooks.useVideo(new File([result.blob], result.name, { type: result.blob.type }), { cropAspect: result.cropAspect });
   };
 }

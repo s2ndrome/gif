@@ -95,7 +95,7 @@ export function applyColor(d, v) {
  * @param maxW,maxH 이 크기를 덮을 만큼만 줄여서 처리 (속도)
  */
 const prepPool = new Map();
-export function prepareFrame(src, iw, ih, color, maxW, maxH, key = 'main') {
+export function prepareFrame(src, iw, ih, color, maxW, maxH, key = 'main', crop = null) {
   const s = Math.min(1, Math.max(maxW / iw, maxH / ih) * 1.35);
   const w = Math.max(2, Math.round(iw * s)), h = Math.max(2, Math.round(ih * s));
   let p = prepPool.get(key);
@@ -104,7 +104,8 @@ export function prepareFrame(src, iw, ih, color, maxW, maxH, key = 'main') {
     prepPool.set(key, p);
   }
   const x = p.canvas.getContext('2d', { willReadFrequently: true });
-  x.drawImage(src, 0, 0, w, h);
+  if (crop) x.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, w, h);
+  else x.drawImage(src, 0, 0, w, h);
   if (needsColor(color)) {
     const im = x.getImageData(0, 0, w, h);
     applyColor(im.data, color);

@@ -123,7 +123,7 @@ function settingsChangedTiming() {
 }
 
 // ───────── 영상 넣기 ─────────
-async function loadVideoFile(f) {
+async function loadVideoFile(f, opts = {}) {
   $('#video-name').textContent = '불러오는 중…';
   if (player.playing) pause();
   const url = URL.createObjectURL(f);
@@ -142,7 +142,15 @@ async function loadVideoFile(f) {
     }
     if (!vid.videoWidth || !d) throw new Error('size');
     if (media.url) URL.revokeObjectURL(media.url);
-    Object.assign(media, { ok: true, url, name: f.name, w: vid.videoWidth, h: vid.videoHeight, dur: d, id: media.id + 1 });
+    // AI 영상(그림 전체 살리기): 위아래(또는 양옆) 검은 띠를 잘라내고 그림 부분만 씀
+    const vw = vid.videoWidth, vh = vid.videoHeight, ca = +opts.cropAspect || 0;
+    let crop = null;
+    if (ca && Math.abs(vw / vh - ca) / ca > 0.01) {
+      // 경계에 얇은 검은 줄이 남지 않게 띠 쪽으로 1%씩 더 안쪽까지 자름
+      if (ca > vw / vh) { const ch = Math.round(vw / ca), m = Math.ceil(ch * 0.01); crop = { x: 0, y: Math.round((vh - ch) / 2) + m, w: vw, h: ch - 2 * m }; }
+      else { const cw = Math.round(vh * ca), m = Math.ceil(cw * 0.01); crop = { x: Math.round((vw - cw) / 2) + m, y: 0, w: cw - 2 * m, h: vh }; }
+    }
+    Object.assign(media, { ok: true, url, name: f.name, w: crop ? crop.w : vw, h: crop ? crop.h : vh, crop, dur: d, id: media.id + 1 });
     S.clip.start = 0;
     S.clip.end = d > 6 ? 3 : null;
     player.pos = 0;
@@ -157,7 +165,7 @@ async function loadVideoFile(f) {
   }
 }
 function videoChanged() {
-  $('#video-name').textContent = media.ok ? `▶ ${media.name} · ${media.w}×${media.h}` : '영상을 여기로 끌어다 놓기';
+  $('#video-name').textContent = media.ok ? `▶ ${media.name} · ${media.w}×${media.h}${media.crop ? ' · 검은 띠 잘라냄' : ''}` : '영상을 여기로 끌어다 놓기';
   $('#video-drop').classList.toggle('has', media.ok);
   $('#trim-box').hidden = !media.ok;
   $('#empty').hidden = media.ok;
@@ -182,7 +190,8 @@ async function buildStrip() {
   for (let k = 0; k < N; k++) {
     if (media.id !== id) return;
     await seekVideo(tv, Math.min(media.dur - 0.05, ((k + 0.5) * media.dur) / N));
-    x.drawImage(tv, k * tw, 0, tw, th);
+    if (media.crop) x.drawImage(tv, media.crop.x, media.crop.y, media.crop.w, media.crop.h, k * tw, 0, tw, th);
+    else x.drawImage(tv, k * tw, 0, tw, th);
     drawStrip();
   }
   tv.removeAttribute('src'); tv.load();
@@ -271,7 +280,7 @@ function frame() {
     dirty = false;
     const t = clamp(position(), 0, Math.max(0, dur - 1e-3));
     const sc = { ...scene(dur), noFade: !player.playing };
-    if (media.ok && vid.readyState >= 2) sc.img = prepareFrame(vid, media.w, media.h, colorVals(), pv.width, pv.height, 'pv');
+    if (media.ok && vid.readyState >= 2) sc.img = prepareFrame(vid, media.w, media.h, colorVals(), pv.width, pv.height, 'pv', media.crop);
     drawFrame(pvx, pv.width, pv.height, t, sc, null);
     $('#seek').max = dur.toFixed(2);
     if (document.activeElement !== $('#seek')) $('#seek').value = t;
@@ -403,7 +412,8 @@ function presetThumbs() {
   const sm = document.createElement('canvas');
   const iw = media.w, ih = media.h, s = 120 / Math.min(iw, ih);
   sm.width = 120; sm.height = 120;
-  sm.getContext('2d').drawImage(vid, (120 - iw * s) / 2, (120 - ih * s) / 2, iw * s, ih * s);
+  const cr = media.crop || { x: 0, y: 0, w: iw, h: ih };
+  sm.getContext('2d').drawImage(vid, cr.x, cr.y, cr.w, cr.h, (120 - iw * s) / 2, (120 - ih * s) / 2, iw * s, ih * s);
   $$('button', box).forEach((b) => {
     const p = COLOR_PRESETS.find((x) => x.id === b.dataset.p);
     const v = {}; for (const k of COLOR_KEYS) v[k] = p.v[k] || 0;
@@ -524,7 +534,7 @@ $('#video-clear').onclick = () => {
   if (player.playing) pause();
   media.id++;
   if (media.url) URL.revokeObjectURL(media.url);
-  Object.assign(media, { ok: false, url: '', name: '', w: 0, h: 0, dur: 0, strip: null });
+  Object.assign(media, { ok: false, url: '', name: '', w: 0, h: 0, dur: 0, strip: null, crop: null });
   vid.removeAttribute('src'); vid.load();
   player.pos = 0;
   videoChanged();
@@ -613,7 +623,8 @@ async function getSamples() {
     await seekVideo(est.ev, vtime(t));
     const c = document.createElement('canvas');
     c.width = Math.round(media.w * sc); c.height = Math.round(media.h * sc);
-    c.getContext('2d').drawImage(est.ev, 0, 0, c.width, c.height);
+    if (media.crop) c.getContext('2d').drawImage(est.ev, media.crop.x, media.crop.y, media.crop.w, media.crop.h, 0, 0, c.width, c.height);
+    else c.getContext('2d').drawImage(est.ev, 0, 0, c.width, c.height);
     out.push({ t, c });
   }
   est.key = key; est.samples = out;
@@ -767,7 +778,7 @@ async function doExport() {
       res = await exportGif({
         W, H, fps: plan.fps, dur, signal: ctrl.signal,
         colors: plan.colors, dither: plan.dither, palette: S.out.palette, loop: +S.out.loop,
-        prepare: async (t) => { await seekVideo(vid, vtime(t)); img = prepareFrame(vid, media.w, media.h, color, W, H, 'export'); },
+        prepare: async (t) => { await seekVideo(vid, vtime(t)); img = prepareFrame(vid, media.w, media.h, color, W, H, 'export', media.crop); },
         draw: (x, w, h, t) => drawFrame(x, w, h, t, { ...sc, img }, null),
         onProgress: (p, l, bytes) => {
           bar.style.width = `${Math.round(p * 100)}%`;
@@ -820,7 +831,7 @@ $('#exp-cancel').onclick = () => exporting && exporting.abort();
 // ───────── 시작 ─────────
 initAi({
   toast,
-  useVideo: (file) => { setTab('video'); loadVideoFile(file); },
+  useVideo: (file, opts) => { setTab('video'); loadVideoFile(file, opts); },
 });
 $('#support').textContent = '모든 처리는 이 브라우저 안에서 해요. 저장 시간은 대략 길이 × 초당 프레임에 비례해요.';
 syncInputs();

@@ -106,6 +106,12 @@
           </label>
           <label class="f">시드 <small>(같은 숫자 = 비슷한 결과)</small><input type="text" id="ai-seed" inputmode="numeric" placeholder="비워두면 매번 다름"></label>
         </div>
+        <label class="f">그림 비율이 16:9 · 9:16과 다를 때 <small>(Veo는 이 두 비율로만 만들어요)</small>
+          <select id="ai-fit">
+            <option value="crop">잘라서 꽉 채우기 · 검은 띠 없음 (가장자리 조금 잘림)</option>
+            <option value="keep">그림 전체 살리기 · 검은 띠는 미리보기 · GIF에서 잘라냄</option>
+          </select>
+        </label>
         <div class="checks"><label><input type="checkbox" id="ai-audio"> 소리도 같이 만들기</label></div>
         <p class="muted">1080p는 모델에 따라 8초에서만 될 수 있어요. GIF로 만들 거면 720p · 소리 끔이 빠르고 충분해요.</p>
       </details>
@@ -142,6 +148,7 @@
           <button class="primary" id="ai-to-gif">이 영상으로 GIF 만들기 →</button>
           <a class="btn" id="ai-dl" download>MP4 다운로드</a>
         </div>
+        <p class="muted" id="ai-dl-note" hidden>MP4 파일에는 검은 띠가 그대로 있어요. '이 영상으로 GIF 만들기'로 가면 잘라낸 상태로 만들어져요.</p>
       </details>
     </div>
 
