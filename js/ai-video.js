@@ -25,6 +25,9 @@ const MOTION_PRESETS = [
   { name: '벚꽃잎', en: 'cherry blossom petals drifting' },
   { name: '빗방울', en: 'light rain falling' },
 ];
+// 줌인 절대 금지: 네거티브에 줌 관련 단어를 겹겹이 + 프롬프트에도 카메라 고정을 강하게 (네거티브만으론 약해서 양쪽에)
+const NOZOOM_NEG = 'zoom in, zooming in, zoom, camera push-in, push in, dolly in, dolly zoom, camera moving closer, camera moving forward, close-up, closer framing, tighter framing, cropping in, enlarging, scaling up, magnification, ken burns effect';
+const NOZOOM_POS = 'IMPORTANT: the camera is completely static and locked off, fixed framing with the exact same composition and size as the image from start to end, absolutely no zoom in, no push-in, no camera movement at all.';
 const BASE_PROMPT = 'Animate this illustration. Keep the exact art style, characters, faces, colors and composition of the image. Subtle, smooth, natural motion: ';
 
 const SET_KEY = 'seol-gif-ai-v1';
@@ -260,6 +263,10 @@ export function initAi(h) {
     b.textContent = p.name; b.title = p.en;
     b.onclick = () => {
       const ta = $('#ai-prompt');
+      if (!ta.value.includes(p.en) && /zoom|push-in|camera/i.test(p.en) && A.neg.includes(NOZOOM_NEG)) {
+        hooks.toast('줌인 절대 금지가 켜져 있어서 카메라 움직임은 넣을 수 없어요. 먼저 줌인 금지를 꺼주세요.', 4000);
+        return;
+      }
       if (ta.value.includes(p.en)) ta.value = ta.value.replace(new RegExp(`,?\\s*${p.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
       else ta.value = ta.value.replace(/[.\s]*$/, '') + (/:\s*$/.test(ta.value) ? ' ' : ', ') + p.en + '.';
       ta.value = ta.value.replace(/:\s*,\s*/, ': ').replace(/,\s*\./, '.');
@@ -267,8 +274,28 @@ export function initAi(h) {
     };
     chips.appendChild(b);
   }
-  const syncChips = () => $$('button', chips).forEach((b) => b.classList.toggle('on', A.prompt.includes(b.title)));
-  $('#ai-reset-prompt').onclick = () => { A.prompt = DEF().prompt; $('#ai-prompt').value = A.prompt; saveSet(); syncChips(); };
+  const syncChips = () => {
+    $$('button', chips).forEach((b) => b.classList.toggle('on', A.prompt.includes(b.title)));
+    $('#ai-nozoom').classList.toggle('on', A.neg.includes(NOZOOM_NEG));
+  };
+  // 줌인 절대 금지 버튼
+  const cleanJoin = (t) => t.replace(/\s*,\s*,+/g, ',').replace(/^\s*,\s*|\s*,\s*$/g, '').replace(/\s{2,}/g, ' ').trim();
+  $('#ai-nozoom').onclick = () => {
+    const on = A.neg.includes(NOZOOM_NEG);
+    if (on) {
+      A.neg = cleanJoin(A.neg.replace(NOZOOM_NEG, ''));
+      A.prompt = A.prompt.replace(NOZOOM_POS, '').trim();
+    } else {
+      A.neg = cleanJoin(`${NOZOOM_NEG}, ${A.neg}`);
+      // 줌인 · 카메라 움직임 문구는 빼고, 고정 문구를 맨 앞(가장 강하게)에
+      for (const p of MOTION_PRESETS) if (/zoom|push-in|camera/i.test(p.en)) A.prompt = A.prompt.replace(new RegExp(`,?\\s*${p.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
+      A.prompt = `${NOZOOM_POS} ${A.prompt.replace(/:\s*,\s*/, ': ').replace(/,\s*\./, '.')}`.trim();
+    }
+    $('#ai-neg').value = A.neg; $('#ai-prompt').value = A.prompt;
+    saveSet(); syncChips();
+    hooks.toast(on ? '줌인 금지를 껐어요.' : '줌인 금지: 네거티브와 프롬프트 양쪽에 넣었어요.');
+  };
+  $('#ai-reset-prompt').onclick = () => { A.prompt = (A.neg.includes(NOZOOM_NEG) ? `${NOZOOM_POS} ` : '') + DEF().prompt; $('#ai-prompt').value = A.prompt; saveSet(); syncChips(); };
 
   // 입력칸 ↔ 상태
   const bind = (id, key, ev = 'input', parse = (v) => v) => {
