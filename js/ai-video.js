@@ -13,6 +13,7 @@ export const AI_MODELS = [
 
 // 움직임 문구 (영어가 더 잘 통해서 영어로 넣고, 버튼은 한국어)
 const MOTION_PRESETS = [
+  { name: '천천히 움직임', en: 'all movement is slow and gentle, calm slow motion' },
   { name: '머리카락 흩날림', en: 'hair gently flowing in the wind' },
   { name: '옷자락 펄럭', en: 'clothing fabric fluttering softly' },
   { name: '눈 깜빡임', en: 'characters blink naturally and breathe subtly' },
