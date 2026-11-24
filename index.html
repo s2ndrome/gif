@@ -218,47 +218,81 @@
           <label class="f">가로 위치<input type="range" min="-1" max="1" step="0.01" data-k="photo.x"></label>
           <label class="f">세로 위치<input type="range" min="-1" max="1" step="0.01" data-k="photo.y"></label>
         </div>
-        <p class="muted">미리보기 화면을 드래그해서 위치를 옮기고, 휠로 확대할 수도 있어요.</p>
+        <p class="muted">미리보기의 빈 곳을 드래그하면 영상 위치가 옮겨지고, 휠로 확대돼요. (글자 · 스티커를 누르면 그것만 움직여요)</p>
       </details>
-      <details class="box" open>
-        <summary>글자 넣기 <small>짤 문구 · 자막 한 줄</small></summary>
-        <label class="f">문구<textarea data-k="text.content" rows="2" placeholder="비워두면 표시 안 함"></textarea></label>
-        <div class="grid2">
-          <label class="f">글꼴
-            <select data-k="text.font">
-              <option value='"Noto Sans KR", sans-serif'>기본 고딕</option>
-              <option value='"Gowun Dodum", sans-serif'>고운돋움</option>
-              <option value='"Nanum Myeongjo", serif'>명조</option>
-              <option value='"Do Hyeon", sans-serif'>도현</option>
-              <option value='"Nanum Pen Script", cursive'>손글씨</option>
-              <option value='"VT323", monospace'>픽셀</option>
-            </select>
-          </label>
-          <label class="f">위치
-            <select data-k="text.pos">
-              <option value="top">위</option>
-              <option value="center">가운데</option>
-              <option value="bottom">아래</option>
-            </select>
-          </label>
-          <label class="f">정렬
-            <select data-k="text.align">
-              <option value="left">왼쪽</option>
-              <option value="center">가운데</option>
-              <option value="right">오른쪽</option>
-            </select>
-          </label>
-          <label class="f">나타나기
-            <select data-k="text.anim">
-              <option value="none">그대로</option>
-              <option value="fade">서서히</option>
-              <option value="type">타자 치듯</option>
-            </select>
-          </label>
-          <label class="f">크기 <output data-out="text.size"></output><input type="range" min="24" max="160" step="1" data-k="text.size"></label>
-          <label class="f">색<input type="color" data-k="text.color"></label>
+      <details class="box" open id="layer-box">
+        <summary>글자 · 스티커 <small>미리보기에서 끌어서 옮겨요</small></summary>
+        <div class="btn-row">
+          <button class="btn" id="add-text">+ 글자</button>
+          <button class="btn" id="add-sticker">+ 스티커</button>
+          <label class="btn file">+ 내 그림 스티커<input type="file" accept="image/*" id="sticker-file"></label>
         </div>
-        <div class="checks"><label><input type="checkbox" data-k="text.shadow"> 그림자</label></div>
+        <div class="sticker-grid" id="sticker-grid" hidden></div>
+        <p class="muted" id="layers-empty">글자나 스티커를 넣으면 미리보기 위에서 <b>끌어서 옮기고</b>, <b>모서리 네모</b>로 크기, <b>위쪽 동그라미</b>로 회전할 수 있어요.</p>
+        <div class="layers" id="layers"></div>
+        <div class="layer-edit" id="layer-edit" hidden>
+          <b class="layer-edit-title" id="layer-edit-title">선택한 글자</b>
+          <div data-lt="text">
+            <label class="f">문구<textarea id="lt-content" data-l="content" rows="2"></textarea></label>
+            <div class="grid2">
+              <label class="f">글꼴
+                <select data-l="font">
+                <option value='"Noto Sans KR", sans-serif'>기본 고딕</option>
+                <option value='"Gowun Dodum", sans-serif'>고운돋움</option>
+                <option value='"Nanum Myeongjo", serif'>명조</option>
+                <option value='"Do Hyeon", sans-serif'>도현</option>
+                <option value='"Nanum Pen Script", cursive'>손글씨</option>
+                <option value='"VT323", monospace'>픽셀</option>
+                </select>
+              </label>
+              <label class="f">정렬
+                <select data-l="align">
+                  <option value="left">왼쪽</option>
+                  <option value="center">가운데</option>
+                  <option value="right">오른쪽</option>
+                </select>
+              </label>
+              <label class="f">크기 <output data-lo="size"></output><input type="range" min="16" max="400" step="1" data-l="size"></label>
+              <label class="f">글자 색<input type="color" data-l="color"></label>
+              <label class="f">나타나기
+                <select data-l="appear">
+                  <option value="none">처음부터</option>
+                  <option value="fade">서서히</option>
+                  <option value="type">타자 치듯</option>
+                </select>
+              </label>
+              <label class="f">테두리 색<input type="color" data-l="strokeColor"></label>
+            </div>
+            <div class="checks"><label><input type="checkbox" data-l="stroke"> 테두리</label><label><input type="checkbox" data-l="shadow"> 그림자</label></div>
+          </div>
+          <div data-lt="sticker">
+            <label class="f">크기 <output data-lo="size"></output>%<input type="range" min="0.03" max="1.5" step="0.01" data-l="size"></label>
+            <div class="checks"><label><input type="checkbox" data-l="flip"> 좌우 뒤집기</label></div>
+            <div class="btn-row"><button class="btn" id="layer-swap">다른 스티커로 바꾸기</button></div>
+          </div>
+          <div class="grid2">
+            <label class="f">회전 <output data-lo="rot"></output>°<input type="range" min="-180" max="180" step="1" data-l="rot"></label>
+            <label class="f">투명도 <output data-lo="opacity" data-pct></output>%<input type="range" min="0.1" max="1" step="0.01" data-l="opacity"></label>
+          </div>
+          <label class="f">움직임
+            <select data-l="anim">
+              <option value="none">그대로</option>
+              <option value="bob">둥실둥실</option>
+              <option value="wiggle">흔들흔들</option>
+              <option value="pulse">쿵쿵</option>
+              <option value="spin">빙글빙글</option>
+              <option value="blink">깜빡깜빡</option>
+              <option value="pop">뿅 등장</option>
+            </select>
+          </label>
+          <div class="btn-row">
+            <button class="btn" id="layer-center">가운데로</button>
+            <button class="btn" id="layer-reset-rot">회전 0°</button>
+            <button class="btn" id="layer-dup">복제</button>
+            <button class="btn" id="layer-del">지우기</button>
+          </div>
+          <p class="muted">키보드: 화살표로 조금씩 옮기기(Shift = 크게) · Delete로 지우기 · Esc로 선택 풀기 · 휠로 크기</p>
+        </div>
       </details>
     </div>
 

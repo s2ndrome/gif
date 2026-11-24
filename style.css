@@ -225,3 +225,22 @@ code { font: 400 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; back
 .sub[open] > summary::before { content: "▾ "; }
 .sub.off { opacity: .55; }
 #ai-code-row[hidden] { display: none; }
+
+/* 글자 · 스티커 */
+.sticker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 10px; padding: 8px; border: 1.5px solid var(--line); background: var(--ice); max-height: 220px; overflow-y: auto; }
+.sticker-grid[hidden] { display: none; }
+.sticker-grid button { border: 0; background: #fff; font-size: 22px; line-height: 1; padding: 6px 0; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.sticker-grid button:hover { background: var(--blue); }
+.layers { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.layers:empty { display: none; }
+.layer-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 2px; border: 1.5px solid var(--line); background: #fff; }
+.layer-row.on { border-color: var(--blue-d); background: var(--ice); }
+.layer-row button { border: 0; background: none; padding: 6px 8px; font: 400 11.5px var(--round); color: var(--blue-d); }
+.layer-row button:disabled { opacity: .3; }
+.layer-row .pick { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.layer-row.on .pick { font-weight: 700; }
+.layer-row .lk { display: inline-block; min-width: 20px; margin-right: 6px; color: var(--mid); font-weight: 700; }
+.layer-row .lk.em { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.layer-edit { margin-top: 12px; padding: 4px 12px 12px; border: 1.5px solid var(--blue); background: #fff; }
+.layer-edit[hidden], .layer-edit [data-lt][hidden], #layers-empty[hidden] { display: none; }
+.layer-edit-title { display: block; margin-top: 8px; font: 700 12px var(--round); color: var(--blue-d); }

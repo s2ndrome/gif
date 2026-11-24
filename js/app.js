@@ -1,6 +1,7 @@
 import { COLOR_PRESETS, COLOR_KEYS, MOTIONS, OVERLAYS, prepareFrame, drawFrame } from './image-fx.js';
 import { exportGif, seekVideo, measureFrames } from './gif.js';
 import { initAi, setAiImage } from './ai-video.js';
+import { initLayers, drawLayers, newText } from './layers.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -17,6 +18,7 @@ const DEFAULTS = () => ({
   overlay: {},
   stamp: { on: false, text: todayStamp() },
   text: { content: '', font: '"Noto Sans KR", sans-serif', pos: 'bottom', align: 'center', anim: 'none', size: 72, color: '#ffffff', shadow: true },
+  layers: [], // 글자 · 스티커
   clip: { start: 0, end: null, speed: 1, dir: 'fwd' },
   out: { ratio: 'video', res: 480, fps: 15, colors: 256, dither: 0.6, palette: 'frame', loop: 0, vfadeIn: 0, vfadeOut: 0, name: '', maxMB: 0 },
 });
@@ -26,6 +28,12 @@ try {
   const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
   if (saved) for (const k of Object.keys(S)) if (saved[k] != null) S[k] = typeof S[k] === 'object' ? { ...S[k], ...saved[k] } : saved[k];
   S.clip.start = 0; S.clip.end = null; // 영상마다 다르니 구간은 기억하지 않음
+  if (!Array.isArray(S.layers)) S.layers = [];
+  // 예전 '글자 넣기' 한 줄 → 움직일 수 있는 글자 레이어로
+  if (S.text && String(S.text.content || '').trim()) {
+    S.layers.push(newText({ content: S.text.content, font: S.text.font, size: S.text.size, color: S.text.color, align: S.text.align, shadow: S.text.shadow, stroke: false, appear: S.text.anim, y: { top: 0.15, center: 0.5, bottom: 0.85 }[S.text.pos] || 0.85 }));
+    S.text.content = '';
+  }
 } catch { /* 무시 */ }
 let saveT = 0;
 const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* 무시 */ } }, 300); scheduleEstimate(); };
@@ -262,6 +270,7 @@ function scene(dur) {
     img: null, dur,
     photo: S.photo, color: S.color, motion: S.motion, overlay: S.overlay,
     stamp: S.stamp, text: S.text,
+    drawLayers: (x, W, H, t) => drawLayers(x, W, H, t, S.layers),
     vfadeIn: S.out.vfadeIn, vfadeOut: S.out.vfadeOut,
   };
 }
@@ -282,6 +291,7 @@ function frame() {
     const sc = { ...scene(dur), noFade: !player.playing };
     if (media.ok && vid.readyState >= 2) sc.img = prepareFrame(vid, media.w, media.h, colorVals(), pv.width, pv.height, 'pv', media.crop);
     drawFrame(pvx, pv.width, pv.height, t, sc, null);
+    if (S.tab !== 'ai') layerUI.drawSelection(pvx, pv.width, pv.height);
     $('#seek').max = dur.toFixed(2);
     if (document.activeElement !== $('#seek')) $('#seek').value = t;
     $('#time').textContent = `${fmt(t)} / ${fmt(dur)}`;
@@ -296,22 +306,25 @@ function frame() {
   let drag = null;
   shot.addEventListener('pointerdown', (e) => {
     if (!media.ok || e.target.closest('.empty')) return;
-    drag = { x: e.clientX, y: e.clientY, px: S.photo.x, py: S.photo.y };
     shot.setPointerCapture(e.pointerId);
+    if (layerUI.pointerDown(e)) return;
+    drag = { x: e.clientX, y: e.clientY, px: S.photo.x, py: S.photo.y };
   });
   shot.addEventListener('pointermove', (e) => {
+    if (layerUI.pointerMove(e)) return;
     if (!drag) return;
     const r = pv.getBoundingClientRect();
     S.photo.x = clamp(drag.px - ((e.clientX - drag.x) / r.width) * 2.2, -1, 1);
     S.photo.y = clamp(drag.py - ((e.clientY - drag.y) / r.height) * 2.2, -1, 1);
     syncInputs('photo.'); redraw();
   });
-  const end = () => { if (drag) { drag = null; save(); } };
+  const end = () => { if (layerUI.pointerUp()) return; if (drag) { drag = null; save(); } };
   shot.addEventListener('pointerup', end);
   shot.addEventListener('pointercancel', end);
   shot.addEventListener('wheel', (e) => {
     if (!media.ok) return;
     e.preventDefault();
+    if (layerUI.wheel(e)) return;
     S.photo.zoom = clamp(S.photo.zoom * Math.exp(-e.deltaY * 0.0015), 1, 2.5);
     syncInputs('photo.'); redraw(); save();
   }, { passive: false });
@@ -754,7 +767,7 @@ async function doExport() {
   openModal('#exp-modal');
   const t0 = performance.now();
   try {
-    await Promise.all([document.fonts.load(`700 40px ${S.text.font}`), document.fonts.load('700 40px "VT323"')]).catch(() => {});
+    await Promise.all([...layerUI.fonts().map((f) => document.fonts.load(`700 40px ${f}`)), document.fonts.load('700 40px "VT323"')]).catch(() => {});
     let plan = basePlan(), guess = 0;
     const memo = new Map();
     label.textContent = target ? `목표 ${+S.out.maxMB}MB에 맞추는 중…` : '용량 계산 중…';
@@ -829,6 +842,12 @@ $('#export-btn2').onclick = doExport;
 $('#exp-cancel').onclick = () => exporting && exporting.abort();
 
 // ───────── 시작 ─────────
+const layerUI = initLayers({
+  canvas: pv,
+  state: () => S,
+  onChange: (persist = true) => { redraw(); if (persist) save(); },
+  toast,
+});
 initAi({
   toast,
   useVideo: (file, opts) => { setTab('video'); loadVideoFile(file, opts); },

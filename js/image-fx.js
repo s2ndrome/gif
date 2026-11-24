@@ -388,7 +388,7 @@ export function drawFrame(x, W, H, t, sc, au) {
     x.fillStyle = '#000'; x.fillRect(0, 0, W, bh); x.fillRect(0, H - bh, W, bh);
   }
 
-  drawText(x, W, H, t, sc, u);
+  if (sc.drawLayers) sc.drawLayers(x, W, H, t);
 
   if (sc.stamp.on) {
     const fs = 44 * u;
