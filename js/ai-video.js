@@ -14,7 +14,7 @@ export const AI_MODELS = [
 // 움직임 문구 (영어가 더 잘 통해서 영어로 넣고, 버튼은 한국어)
 const MOTION_PRESETS = [
   { name: '머리카락 흩날림', en: 'hair gently flowing in the wind' },
-  { name: '옷자락 펄럭', en: 'clothes and ribbons fluttering softly' },
+  { name: '옷자락 펄럭', en: 'clothing fabric fluttering softly' },
   { name: '눈 깜빡임', en: 'characters blink naturally and breathe subtly' },
   { name: '천천히 줌인', en: 'slow cinematic camera push-in' },
   { name: '카메라 살짝 회전', en: 'slow gentle camera orbit' },
@@ -30,7 +30,7 @@ const SET_KEY = 'seol-gif-ai-v1';
 const TOK_KEY = 'seol-gif-ai-token';
 const CODE_KEY = 'seol-gif-ai-code';
 const DEF = () => ({
-  prompt: BASE_PROMPT + 'hair gently flowing in the wind, clothes and ribbons fluttering softly.',
+  prompt: BASE_PROMPT + 'hair gently flowing in the wind, clothing fabric fluttering softly.',
   neg: 'distorted face, extra limbs, style change, text, watermark',
   model: AI_MODELS[0].id, dur: 6, aspect: 'auto', res: '720p', audio: false, seed: '',
   server: '', project: '', location: 'us-central1', auth: 'token', remember: false,
@@ -38,6 +38,8 @@ const DEF = () => ({
 
 let A = DEF();
 try { A = { ...A, ...JSON.parse(localStorage.getItem(SET_KEY) || '{}') }; } catch { /* 무시 */ }
+// 예전 문구(옷 + 리본) → 옷만
+A.prompt = String(A.prompt).replace('clothes and ribbons fluttering softly', 'clothing fabric fluttering softly');
 const saveSet = () => { try { const { ...s } = A; localStorage.setItem(SET_KEY, JSON.stringify(s)); } catch { /* 무시 */ } };
 
 function loadToken() {
