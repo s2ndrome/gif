@@ -38,10 +38,26 @@
         <button data-ratio="video">원본</button>
         <button data-ratio="1:1">1:1</button>
         <button data-ratio="4:5">4:5</button>
+        <button data-ratio="3:4">3:4</button>
         <button data-ratio="9:16">9:16</button>
         <button data-ratio="16:9">16:9</button>
+        <button data-ratio="custom">직접</button>
       </div>
       <button class="primary" id="export-btn">GIF 저장</button>
+    </div>
+    <div class="ratio-custom" id="ratio-custom" hidden>
+      <div class="ratio-row">
+        <b>원하는 비율</b>
+        <input type="number" id="ratio-w" min="0.1" max="100" step="0.1" inputmode="decimal" aria-label="가로 비율">
+        <span>:</span>
+        <input type="number" id="ratio-h" min="0.1" max="100" step="0.1" inputmode="decimal" aria-label="세로 비율">
+        <button class="btn" id="ratio-swap" title="가로 · 세로 바꾸기">⇄</button>
+      </div>
+      <div class="chips" id="ratio-more">
+        <button data-r="2:3">2:3</button><button data-r="3:2">3:2</button><button data-r="4:3">4:3</button>
+        <button data-r="5:4">5:4</button><button data-r="21:9">21:9</button><button data-r="1:2">1:2</button><button data-r="2:1">2:1</button>
+      </div>
+      <p class="muted">미리보기를 끌어서 남길 부분을 고르고, 휠(또는 '확대')로 얼마나 자를지 정해요.</p>
     </div>
     <div class="pv-stage">
       <div class="shot" id="shot">
@@ -359,8 +375,14 @@
             <option value="video">영상 비율 그대로</option>
             <option value="1:1">1:1 정사각형</option>
             <option value="4:5">4:5 세로</option>
+            <option value="3:4">3:4 세로</option>
+            <option value="2:3">2:3 세로</option>
             <option value="9:16">9:16 세로</option>
+            <option value="4:3">4:3 가로</option>
+            <option value="3:2">3:2 가로</option>
             <option value="16:9">16:9 가로</option>
+            <option value="21:9">21:9 와이드</option>
+            <option value="custom" id="ratio-opt-custom">직접 입력…</option>
           </select>
         </label>
         <div class="grid2">

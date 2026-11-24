@@ -246,3 +246,13 @@ code { font: 400 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; back
 .layer-edit-title { display: block; margin-top: 8px; font: 700 12px var(--round); color: var(--blue-d); }
 
 .btn.busy { pointer-events: none; opacity: .75; }
+
+/* 비율 직접 */
+.ratio-custom { width: 100%; max-width: 440px; padding: 8px 12px 10px; border: 1.5px solid var(--line); background: var(--ice); }
+.ratio-custom[hidden] { display: none; }
+.ratio-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--blue-d); }
+.ratio-row input { width: 64px; padding: 5px 8px; border: 2px solid var(--line); background: #fff; font: 400 13px var(--round); color: var(--ink); text-align: center; }
+.ratio-row input:focus { outline: 0; border-color: var(--blue); }
+.ratio-row .btn { margin: 0; padding: 4px 10px; }
+.ratio-custom .chips { margin-top: 8px; }
+.ratio-custom .muted { margin-top: 6px; }

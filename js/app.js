@@ -249,7 +249,7 @@ function resolveRes() {
 function outSize(res = resolveRes()) {
   let ar;
   if (S.out.ratio === 'video') ar = media.ok ? clamp(media.native ? media.native.w / media.native.h : media.w / media.h, 9 / 21, 21 / 9) : 1;
-  else { const [a, b] = S.out.ratio.split(':').map(Number); ar = a / b; }
+  else { const [a, b] = String(S.out.ratio).split(':').map(Number); ar = a > 0 && b > 0 ? clamp(a / b, 1 / 4, 4) : 1; }
   let W, H;
   if (ar < 1) { W = res; H = res / ar; } else { H = res; W = res * ar; }
   const ev = (v) => Math.max(2, Math.round(v / 2) * 2);
@@ -355,7 +355,21 @@ function syncInputs(prefix = '') {
   syncChips();
 }
 function syncChips() {
-  $$('#ratio-seg button').forEach((b) => b.classList.toggle('on', b.dataset.ratio === S.out.ratio));
+  const segPreset = $$('#ratio-seg button').some((b) => b.dataset.ratio === S.out.ratio);
+  const isCustom = S.out.ratio !== 'video' && (!segPreset || ratioOpen);
+  $$('#ratio-seg button').forEach((b) => b.classList.toggle('on', b.dataset.ratio === 'custom' ? isCustom : !isCustom && b.dataset.ratio === S.out.ratio));
+  $('#ratio-custom').hidden = !isCustom;
+  if (isCustom) {
+    const [a, b] = String(S.out.ratio).split(':');
+    if (document.activeElement !== $('#ratio-w')) $('#ratio-w').value = a;
+    if (document.activeElement !== $('#ratio-h')) $('#ratio-h').value = b;
+    $$('#ratio-more button').forEach((x) => x.classList.toggle('on', x.dataset.r === S.out.ratio));
+  }
+  // 저장 탭 선택칸: 목록에 없는 비율이면 '직접 (a:b)'로 보여주기
+  const sel = $('[data-k="out.ratio"]'), known = [...sel.options].some((o) => o.value === S.out.ratio && o.id !== 'ratio-opt-custom');
+  const oc = $('#ratio-opt-custom');
+  oc.value = known ? 'custom' : S.out.ratio; oc.textContent = known ? '직접 입력…' : `직접 ${S.out.ratio}`;
+  sel.value = S.out.ratio;
   $$('#fit-chips button').forEach((b) => b.classList.toggle('on', b.dataset.fit === S.photo.fit));
   $$('#speed-chips button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === S.clip.speed));
   $$('#dir-chips button').forEach((b) => b.classList.toggle('on', b.dataset.dir === S.clip.dir));
@@ -370,6 +384,7 @@ for (const el of $$('[data-k]')) {
   const ev = el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'color' ? 'change' : 'input';
   el.addEventListener(ev, () => {
     const k = el.dataset.k;
+    if (k === 'out.ratio' && el.value === 'custom') return; // '직접 입력…'은 아래에서 따로
     let v;
     if (el.type === 'checkbox') v = el.checked;
     else if (k === 'out.res' && el.value === 'orig') v = 'orig';
@@ -404,7 +419,40 @@ function setTab(t) {
 }
 $$('.tabs button').forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
 
-$$('#ratio-seg button').forEach((b) => (b.onclick = () => { S.out.ratio = b.dataset.ratio; syncInputs(); sizeCanvas(); save(); }));
+// 비율: 버튼 · 직접 입력
+let ratioOpen = false;
+const setRatio = (r) => { S.out.ratio = r; syncInputs(); sizeCanvas(); save(); };
+$$('#ratio-seg button').forEach((b) => (b.onclick = () => {
+  if (b.dataset.ratio === 'custom') {
+    ratioOpen = true;
+    // 지금 화면 비율에서 시작
+    const { W, H } = outSize(); const g = (x, y) => (y ? g(y, x % y) : x), d = g(W, H);
+    setRatio(W / d <= 32 && H / d <= 32 ? `${W / d}:${H / d}` : `${+(W / H).toFixed(2)}:1`);
+    setTimeout(() => $('#ratio-w').focus(), 30);
+    return;
+  }
+  ratioOpen = false; setRatio(b.dataset.ratio);
+}));
+const applyCustomRatio = () => {
+  const a = parseFloat($('#ratio-w').value), b = parseFloat($('#ratio-h').value);
+  if (!(a > 0 && b > 0)) return;
+  ratioOpen = true;
+  if (a / b > 4 || b / a > 4) { // 너무 길쭉하면 4:1 · 1:4로 맞춤
+    toast('비율은 4:1 ~ 1:4 사이까지 돼요. 가장 가까운 비율로 맞췄어요.');
+    setRatio(a > b ? '4:1' : '1:4');
+    return;
+  }
+  setRatio(`${+a.toFixed(2)}:${+b.toFixed(2)}`);
+};
+// 입력을 마치면(칸을 벗어나면) 실제 적용된 비율로 칸을 다시 채움
+for (const id of ['#ratio-w', '#ratio-h']) $(id).addEventListener('change', () => { $(id).blur(); syncChips(); });
+$('#ratio-w').addEventListener('input', applyCustomRatio);
+$('#ratio-h').addEventListener('input', applyCustomRatio);
+$('#ratio-swap').onclick = () => { const [a, b] = String(S.out.ratio).split(':'); if (b) { ratioOpen = true; setRatio(`${b}:${a}`); } };
+$$('#ratio-more button').forEach((b) => (b.onclick = () => { ratioOpen = true; setRatio(b.dataset.r); }));
+$('[data-k="out.ratio"]').addEventListener('change', (e) => {
+  if (e.target.value === 'custom') { ratioOpen = true; setTab('video'); $('#ratio-seg [data-ratio=custom]').click(); }
+});
 $$('#fit-chips button').forEach((b) => (b.onclick = () => { S.photo.fit = b.dataset.fit; syncInputs(); redraw(); save(); }));
 $$('#speed-chips button').forEach((b) => (b.onclick = () => { S.clip.speed = +b.dataset.speed; syncInputs(); settingsChangedTiming(); save(); }));
 $$('#dir-chips button').forEach((b) => (b.onclick = () => { S.clip.dir = b.dataset.dir; syncInputs(); settingsChangedTiming(); save(); }));
