@@ -158,7 +158,9 @@ async function loadVideoFile(f, opts = {}) {
       if (ca > vw / vh) { const ch = Math.round(vw / ca), m = Math.ceil(ch * 0.01); crop = { x: 0, y: Math.round((vh - ch) / 2) + m, w: vw, h: ch - 2 * m }; }
       else { const cw = Math.round(vh * ca), m = Math.ceil(cw * 0.01); crop = { x: Math.round((vw - cw) / 2) + m, y: 0, w: cw - 2 * m, h: vh }; }
     }
-    Object.assign(media, { ok: true, url, name: f.name, w: crop ? crop.w : vw, h: crop ? crop.h : vh, crop, dur: d, id: media.id + 1 });
+    Object.assign(media, { ok: true, url, name: f.name, w: crop ? crop.w : vw, h: crop ? crop.h : vh, crop, native: opts.native || null, dur: d, id: media.id + 1 });
+    // AI 영상: GIF도 넣은 그림 크기 · 비율로
+    if (opts.native) { S.out.ratio = 'video'; S.out.res = 'orig'; syncInputs(); }
     S.clip.start = 0;
     S.clip.end = d > 6 ? 3 : null;
     player.pos = 0;
@@ -173,7 +175,7 @@ async function loadVideoFile(f, opts = {}) {
   }
 }
 function videoChanged() {
-  $('#video-name').textContent = media.ok ? `▶ ${media.name} · ${media.w}×${media.h}${media.crop ? ' · 검은 띠 잘라냄' : ''}` : '영상을 여기로 끌어다 놓기';
+  $('#video-name').textContent = media.ok ? `▶ ${media.name} · ${media.native ? `${media.native.w}×${media.native.h} (넣은 그림 크기)` : `${media.w}×${media.h}`}` : '영상을 여기로 끌어다 놓기';
   $('#video-drop').classList.toggle('has', media.ok);
   $('#trim-box').hidden = !media.ok;
   $('#empty').hidden = media.ok;
@@ -238,9 +240,15 @@ function updateTrimUI() {
 const pv = $('#pv');
 const pvx = pv.getContext('2d', { alpha: false });
 
-function outSize(res = +S.out.res) {
+/** 크기(짧은 쪽). '원본 크기'면 넣은 영상(AI면 넣은 그림)의 짧은 쪽 */
+function resolveRes() {
+  if (S.out.res !== 'orig') return +S.out.res || 480;
+  const n = media.native || (media.ok ? { w: media.w, h: media.h } : null);
+  return n ? clamp(Math.min(n.w, n.h), 64, 1440) : 480;
+}
+function outSize(res = resolveRes()) {
   let ar;
-  if (S.out.ratio === 'video') ar = media.ok ? clamp(media.w / media.h, 9 / 21, 21 / 9) : 1;
+  if (S.out.ratio === 'video') ar = media.ok ? clamp(media.native ? media.native.w / media.native.h : media.w / media.h, 9 / 21, 21 / 9) : 1;
   else { const [a, b] = S.out.ratio.split(':').map(Number); ar = a / b; }
   let W, H;
   if (ar < 1) { W = res; H = res / ar; } else { H = res; W = res * ar; }
@@ -364,6 +372,7 @@ for (const el of $$('[data-k]')) {
     const k = el.dataset.k;
     let v;
     if (el.type === 'checkbox') v = el.checked;
+    else if (k === 'out.res' && el.value === 'orig') v = 'orig';
     else if (el.type === 'range' || el.type === 'number' || NUM_KEYS.includes(k)) v = Math.max(0, parseFloat(el.value) || 0);
     else v = el.value;
     setK(k, v);
@@ -547,7 +556,7 @@ $('#video-clear').onclick = () => {
   if (player.playing) pause();
   media.id++;
   if (media.url) URL.revokeObjectURL(media.url);
-  Object.assign(media, { ok: false, url: '', name: '', w: 0, h: 0, dur: 0, strip: null, crop: null });
+  Object.assign(media, { ok: false, url: '', name: '', w: 0, h: 0, dur: 0, strip: null, crop: null, native: null });
   vid.removeAttribute('src'); vid.load();
   player.pos = 0;
   videoChanged();
@@ -609,7 +618,7 @@ const FPS_STEPS = [25, 20, 15, 12, 10, 8, 6, 5];
 const COL_STEPS = [256, 128, 64, 32, 16];
 const SAMPLES = 4;
 const est = { ver: 0, sig: '', busy: false, cur: 0, fit: null, key: '', samples: null, ev: null, evId: -1 };
-const basePlan = () => ({ res: +S.out.res, fps: +S.out.fps, colors: +S.out.colors, dither: +S.out.dither });
+const basePlan = () => ({ res: resolveRes(), fps: +S.out.fps, colors: +S.out.colors, dither: +S.out.dither });
 const targetBytes = () => (+S.out.maxMB > 0 ? +S.out.maxMB * MB : 0);
 const planFrames = (fps) => Math.max(1, Math.round(totalDur() * fps));
 const planText = (p) => { const { W, H } = outSize(p.res); return `${W}×${H} · ${p.fps}fps · ${p.colors}색${p.dither ? '' : ' · 디더링 끔'}`; };

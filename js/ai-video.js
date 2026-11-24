@@ -36,7 +36,7 @@ const CODE_KEY = 'seol-gif-ai-code';
 const DEF = () => ({
   prompt: BASE_PROMPT + 'hair gently flowing in the wind, clothing fabric fluttering softly.',
   neg: 'distorted face, extra limbs, style change, text, watermark',
-  model: AI_MODELS[0].id, dur: 6, aspect: 'auto', fit: 'crop', res: '720p', audio: false, seed: '',
+  model: AI_MODELS[0].id, dur: 6, aspect: 'auto', res: '720p', audio: false, seed: '',
   server: '', project: '', location: 'us-central1', auth: 'token', remember: false,
 });
 
@@ -82,16 +82,9 @@ export async function setAiImage(file) {
 const autoAspect = () => (img.w && img.h > img.w ? '9:16' : '16:9');
 const targetAspect = () => { const [a, b] = (A.aspect === 'auto' ? autoAspect() : A.aspect).split(':').map(Number); return a / b; };
 
-/** 보낼 그림 만들기. Veo는 16:9 / 9:16만 만들어서, 그림 비율이 다르면 검은 띠를 붙임.
- *  crop: 그 비율로 가운데를 잘라서 보냄 → 검은 띠 없음
- *  keep: 그림 전체를 보냄 → 결과의 검은 띠는 미리보기 · GIF에서 잘라냄 */
+/** 보낼 그림: 자르지 않고 그대로 (Veo는 16:9 / 9:16으로 만들고 남는 곳에 검은 띠를 붙임 → 받은 뒤 잘라내고 그림 크기로 맞춤) */
 function encodeImage() {
-  const iw = img.w, ih = img.h, ta = targetAspect();
-  let sx = 0, sy = 0, sw = iw, sh = ih;
-  if (A.fit === 'crop' && Math.abs(iw / ih - ta) / ta > 0.01) {
-    if (iw / ih > ta) { sw = Math.round(ih * ta); sx = Math.round((iw - sw) / 2); }
-    else { sh = Math.round(iw / ta); sy = Math.round((ih - sh) / 2); }
-  }
+  const sx = 0, sy = 0, sw = img.w, sh = img.h;
   const s = Math.min(1, 1920 / Math.max(sw, sh)); // Veo는 png / jpeg만 받아서, 너무 크면 줄이고 jpeg로
   const c = document.createElement('canvas');
   c.width = Math.round(sw * s); c.height = Math.round(sh * s);
@@ -177,7 +170,8 @@ const secs = () => Math.round((performance.now() - job.t0) / 1000);
 async function generate() {
   if (job.ctrl) { job.ctrl.abort(); return; }
   if (!img.el) { hooks.toast('먼저 움직일 그림을 넣어주세요.'); return; }
-  const cropAspect = A.fit === 'keep' ? img.w / img.h : 0; // 이번 결과에서 잘라낼 비율 (보낸 순간 기준)
+  const cropAspect = img.w / img.h; // 결과에서 검은 띠를 잘라내고 남길 비율 (= 넣은 그림 비율)
+  const native = { w: img.w, h: img.h }; // 돌려줄 크기 (= 넣은 그림 크기)
   if (useServer()) {
     if (serverInfo?.needsCode && !$('#ai-code').value.trim()) { $('#ai-conn').open = true; $('#ai-code').focus(); hooks.toast('접속 코드를 넣어주세요.'); return; }
     storeCode($('#ai-code').value.trim());
@@ -222,7 +216,7 @@ async function generate() {
     const bin = atob(v.bytesBase64Encoded), u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
     const blob = new Blob([u8], { type: v.mimeType && v.mimeType.startsWith('video/') ? v.mimeType : 'video/mp4' });
-    showResult(blob, cropAspect);
+    showResult(blob, cropAspect, native);
     status(`<span class="big ok">완성!<small>${secs()}초 걸림 · ${(blob.size / 1048576).toFixed(1)}MB</small></span>`, '');
   } catch (e) {
     if (e.name === 'AbortError') status('그만뒀어요. (이미 보낸 요청은 Google 쪽에서 계속 만들어질 수 있어요)');
@@ -234,18 +228,89 @@ async function generate() {
   }
 }
 
-function showResult(blob, cropAspect = 0) {
-  if (result) URL.revokeObjectURL(result.url);
+function showResult(blob, cropAspect, native) {
+  if (result) { URL.revokeObjectURL(result.url); if (result.fitUrl) URL.revokeObjectURL(result.fitUrl); }
   const base = (img.file?.name || 'image').replace(/\.[^.]+$/, '');
-  result = { blob, url: URL.createObjectURL(blob), name: `${base}-ai.mp4`, cropAspect };
-  $('#ai-dl-note').hidden = !cropAspect;
+  const conv = ++convId;
+  result = { blob, url: URL.createObjectURL(blob), base, cropAspect, native, fitUrl: '' };
   const v = $('#ai-video'); v.src = result.url;
   setView('video');
   v.play().catch(() => {});
-  const a = $('#ai-dl'); a.href = result.url; a.download = result.name;
-  a.textContent = `MP4 다운로드 (${(blob.size / 1048576).toFixed(1)}MB)`;
   $('#ai-result-box').hidden = false; $('#ai-result-box').open = true;
   $('#ai-result-box').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // 다운로드용: 검은 띠를 잘라내고 넣은 그림 크기로 다시 저장
+  const a = $('#ai-dl'), note = $('#ai-dl-note');
+  const { w, h } = outDims(native);
+  a.removeAttribute('href'); a.classList.add('busy');
+  a.textContent = `그림 크기(${w}×${h})로 맞추는 중… 0%`;
+  note.textContent = '영상 길이만큼 걸려요. 이 탭을 열어두세요.';
+  toImageSize(result.url, cropAspect, w, h, (p) => { if (conv === convId) a.textContent = `그림 크기(${w}×${h})로 맞추는 중… ${Math.round(p * 100)}%`; })
+    .then((r) => {
+      if (conv !== convId) return;
+      result.fitUrl = URL.createObjectURL(r.blob);
+      a.href = result.fitUrl; a.download = `${base}-ai.${r.ext}`; a.classList.remove('busy');
+      a.textContent = `${r.ext.toUpperCase()} 다운로드 · ${w}×${h} (${(r.blob.size / 1048576).toFixed(1)}MB)`;
+      note.textContent = `넣은 그림과 같은 ${w}×${h} 크기예요.${r.ext === 'webm' ? ' (이 브라우저는 MP4로 저장을 못 해서 WebM으로 저장돼요)' : ''}`;
+    })
+    .catch((e) => {
+      if (conv !== convId) return;
+      console.warn(e);
+      a.href = result.url; a.download = `${base}-ai-original.mp4`; a.classList.remove('busy');
+      a.textContent = `원본 MP4 다운로드 (${(blob.size / 1048576).toFixed(1)}MB)`;
+      note.textContent = '이 브라우저에서는 그림 크기로 다시 저장하지 못했어요. 원본(검은 띠 포함)을 받거나, GIF 만들기로 가면 그림 크기로 만들어져요.';
+    });
+}
+
+let convId = 0;
+/** 돌려줄 크기: 넣은 그림 크기 그대로 (짝수로, 너무 크면 긴 쪽 1920에 맞춰 같은 비율로) */
+function outDims(n) {
+  const s = Math.min(1, 1920 / Math.max(n.w, n.h));
+  const ev = (v) => Math.max(2, Math.round(v / 2) * 2);
+  return { w: ev(n.w * s), h: ev(n.h * s) };
+}
+/** Veo 결과에서 그림 부분만 잘라 w×h로 다시 녹화 (MediaRecorder, 실제 길이만큼 걸림) */
+async function toImageSize(url, aspect, w, h, onProg) {
+  if (typeof MediaRecorder === 'undefined') throw new Error('no MediaRecorder');
+  const mime = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+  if (!mime) throw new Error('no codec');
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.src = url;
+  await new Promise((r, j) => { v.onloadeddata = r; v.onerror = j; });
+  const vw = v.videoWidth, vh = v.videoHeight;
+  let cr = { x: 0, y: 0, w: vw, h: vh };
+  if (aspect && Math.abs(vw / vh - aspect) / aspect > 0.01) {
+    if (aspect > vw / vh) { const ch = Math.round(vw / aspect), m = Math.ceil(ch * 0.01); cr = { x: 0, y: Math.round((vh - ch) / 2) + m, w: vw, h: ch - 2 * m }; }
+    else { const cw = Math.round(vh * aspect), m = Math.ceil(cw * 0.01); cr = { x: Math.round((vw - cw) / 2) + m, y: 0, w: cw - 2 * m, h: vh }; }
+  }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  const draw = () => x.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, w, h);
+  draw();
+  const stream = c.captureStream(30);
+  try { const a = v.captureStream ? v.captureStream().getAudioTracks() : []; a.forEach((t) => stream.addTrack(t)); } catch { /* 소리 없음 */ }
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(Math.min(16e6, w * h * 30 * 0.25)) });
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const done = new Promise((r) => { rec.onstop = r; });
+  rec.start(250);
+  await v.play();
+  await new Promise((res) => {
+    const tick = () => {
+      draw();
+      onProg(Math.min(1, v.currentTime / (v.duration || 1)));
+      if (v.ended || v.currentTime >= v.duration - 0.01) return res();
+      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
+    };
+    v.onended = () => res();
+    tick();
+  });
+  draw();
+  await new Promise((r) => setTimeout(r, 120));
+  rec.stop(); await done;
+  stream.getTracks().forEach((t) => t.stop());
+  v.removeAttribute('src'); v.load();
+  return { blob: new Blob(chunks, { type: mime.split(';')[0] }), ext: mime.startsWith('video/mp4') ? 'mp4' : 'webm' };
 }
 
 // ───────── 왼쪽 미리보기 ─────────
@@ -269,7 +334,7 @@ function fitBox(el, aspect) {
   el.style.width = `${Math.round(w)}px`; el.style.height = `${Math.round(w / aspect)}px`; el.style.objectFit = 'cover';
 }
 function fitPreview() {
-  if (img.w) fitBox($('#ai-img'), A.fit === 'crop' ? targetAspect() : 0);
+  if (img.w) fitBox($('#ai-img'), 0);
   if (result) fitBox($('#ai-video'), result.cropAspect || 0);
 }
 
@@ -336,9 +401,7 @@ export function initAi(h) {
   bind('#ai-neg', 'neg');
   bind('#ai-dur', 'dur', 'change', Number);
   bind('#ai-aspect', 'aspect', 'change');
-  bind('#ai-fit', 'fit', 'change');
   $('#ai-aspect').addEventListener('change', fitPreview);
-  $('#ai-fit').addEventListener('change', fitPreview);
   addEventListener('resize', fitPreview);
   bind('#ai-res', 'res', 'change');
   bind('#ai-audio', 'audio', 'change');
@@ -422,6 +485,7 @@ export function initAi(h) {
   setView('img');
   $('#ai-to-gif').onclick = () => {
     if (!result) return;
-    hooks.useVideo(new File([result.blob], result.name, { type: result.blob.type }), { cropAspect: result.cropAspect });
+    // GIF는 화질 좋은 원본에서 검은 띠만 잘라 쓰고, 크기는 넣은 그림 크기로
+    hooks.useVideo(new File([result.blob], `${result.base}-ai.mp4`, { type: result.blob.type }), { cropAspect: result.cropAspect, native: result.native });
   };
 }
