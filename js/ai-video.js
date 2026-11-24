@@ -1,6 +1,8 @@
 // 그림 한 장 → AI(Vertex AI Veo)로 움직이는 영상 만들기
 // 토큰은 이 브라우저에서 Google(aiplatform.googleapis.com)로만 바로 보냅니다. 다른 곳엔 보내지 않아요.
 
+import { AI_SERVER } from './config.js';
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
@@ -26,11 +28,12 @@ const BASE_PROMPT = 'Animate this illustration. Keep the exact art style, charac
 
 const SET_KEY = 'seol-gif-ai-v1';
 const TOK_KEY = 'seol-gif-ai-token';
+const CODE_KEY = 'seol-gif-ai-code';
 const DEF = () => ({
   prompt: BASE_PROMPT + 'hair gently flowing in the wind, clothes and ribbons fluttering softly.',
   neg: 'distorted face, extra limbs, style change, text, watermark',
   model: AI_MODELS[0].id, dur: 6, aspect: 'auto', res: '720p', audio: false, seed: '',
-  project: '', location: 'us-central1', auth: 'token', base: '', remember: false,
+  server: '', project: '', location: 'us-central1', auth: 'token', remember: false,
 });
 
 let A = DEF();
@@ -84,9 +87,16 @@ function syncAspectHint() {
 }
 
 // ───────── 연결 ─────────
+// 서버 모드: 토큰은 중계 서버(server/worker.js)에만 있고, 페이지는 서버 주소만 알아요.
+const serverUrl = () => (A.server || AI_SERVER || '').trim().replace(/\/+$/, '');
+const useServer = () => !!serverUrl();
+const loadCode = () => { try { return localStorage.getItem(CODE_KEY) || ''; } catch { return ''; } };
+const storeCode = (v) => { try { v ? localStorage.setItem(CODE_KEY, v) : localStorage.removeItem(CODE_KEY); } catch { /* 무시 */ } };
+let serverInfo = null; // /health 결과
+
 function endpoint(model, method) {
+  if (useServer()) return `${serverUrl()}/${method === 'predictLongRunning' ? 'generate' : 'status'}?model=${encodeURIComponent(model)}`;
   const loc = (A.location || 'us-central1').trim();
-  if (A.base.trim()) return `${A.base.trim().replace(/\/+$/, '')}/${model}:${method}`;
   const host = loc === 'global' ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
   if (!A.project.trim() && A.auth === 'key') return `https://aiplatform.googleapis.com/v1/publishers/google/models/${model}:${method}`;
   return `https://${host}/v1/projects/${encodeURIComponent(A.project.trim())}/locations/${loc}/publishers/google/models/${model}:${method}`;
@@ -95,19 +105,22 @@ async function call(url, body, signal) {
   const tok = $('#ai-token').value.trim();
   const headers = { 'Content-Type': 'application/json' };
   let u = url;
-  if (A.auth === 'key') u += (u.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(tok);
+  if (useServer()) { const c = $('#ai-code').value.trim(); if (c) headers['X-Access-Code'] = c; }
+  else if (A.auth === 'key') u += (u.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(tok);
   else headers.Authorization = `Bearer ${tok}`;
   let r;
   try {
     r = await fetch(u, { method: 'POST', headers, body: JSON.stringify(body), signal });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
-    throw new Error('Google 서버에 연결하지 못했어요. 인터넷 연결이나 지역(location) 이름을 확인해주세요. 회사망·확장 프로그램이 막고 있을 수도 있어요.');
+    throw new Error(useServer() ? 'AI 서버에 연결하지 못했어요. 서버 주소가 맞는지, 서버의 ALLOWED_ORIGINS에 이 페이지 주소가 들어 있는지 확인해주세요.' : 'Google 서버에 연결하지 못했어요. 인터넷 연결이나 지역(location) 이름을 확인해주세요. 회사망·확장 프로그램이 막고 있을 수도 있어요.');
   }
   const txt = await r.text();
   let j = null; try { j = JSON.parse(txt); } catch { /* 무시 */ }
   if (!r.ok) {
     const msg = j?.error?.message || txt.slice(0, 300) || r.statusText;
+    if (r.status === 401 && j?.error?.code === 'ACCESS_CODE') { $('#ai-conn').open = true; $('#ai-code').focus(); throw new Error('접속 코드가 틀렸어요. AI 서버 칸에서 접속 코드를 확인해주세요.'); }
+    if (r.status === 401 && useServer()) throw new Error(`서버의 Google 인증이 안 돼요 (401). 서버에 넣은 서비스 계정 키(GCP_SA_KEY)를 확인해주세요.\n${msg}`);
     if (r.status === 401) throw new Error(`인증이 안 돼요 (401). ${A.auth === 'token' ? '액세스 토큰은 1시간이면 만료돼요. 새로 발급해서 넣어주세요.' : 'API 키를 확인해주세요.'}\n${msg}`);
     if (r.status === 403) throw new Error(`권한이 없어요 (403). 프로젝트에서 Vertex AI API가 켜져 있는지, 이 계정에 Vertex AI 사용 권한이 있는지 확인해주세요.\n${msg}`);
     if (r.status === 404) throw new Error(`모델이나 프로젝트를 찾을 수 없어요 (404). 프로젝트 ID · 지역 · 모델 이름을 확인해주세요.\n${msg}`);
@@ -143,10 +156,15 @@ const secs = () => Math.round((performance.now() - job.t0) / 1000);
 async function generate() {
   if (job.ctrl) { job.ctrl.abort(); return; }
   if (!img.b64) { hooks.toast('먼저 움직일 그림을 넣어주세요.'); return; }
-  if (!$('#ai-token').value.trim()) { $('#ai-conn').open = true; $('#ai-token').focus(); hooks.toast(A.auth === 'key' ? 'API 키를 넣어주세요.' : '액세스 토큰을 넣어주세요.'); return; }
-  if (!A.project.trim() && A.auth === 'token' && !A.base.trim()) { $('#ai-conn').open = true; $('#ai-project').focus(); hooks.toast('Google Cloud 프로젝트 ID를 넣어주세요.'); return; }
+  if (useServer()) {
+    if (serverInfo?.needsCode && !$('#ai-code').value.trim()) { $('#ai-conn').open = true; $('#ai-code').focus(); hooks.toast('접속 코드를 넣어주세요.'); return; }
+    storeCode($('#ai-code').value.trim());
+  } else {
+    if (!$('#ai-token').value.trim()) { $('#ai-conn').open = true; $('#ai-direct').open = true; $('#ai-server').focus(); hooks.toast('AI 서버 주소를 넣어주세요. (또는 고급에서 토큰으로 직접 연결)'); return; }
+    if (!A.project.trim() && A.auth === 'token') { $('#ai-conn').open = true; $('#ai-direct').open = true; $('#ai-project').focus(); hooks.toast('Google Cloud 프로젝트 ID를 넣어주세요.'); return; }
+    storeToken($('#ai-token').value.trim());
+  }
   if (!A.prompt.trim()) { hooks.toast('어떻게 움직일지 설명을 적어주세요.'); return; }
-  storeToken($('#ai-token').value.trim());
 
   const ctrl = new AbortController();
   job.ctrl = ctrl; job.t0 = performance.now();
@@ -266,7 +284,6 @@ export function initAi(h) {
   bind('#ai-project', 'project');
   bind('#ai-location', 'location');
   bind('#ai-auth', 'auth', 'change');
-  bind('#ai-base', 'base');
   bind('#ai-remember', 'remember', 'change');
   sel.value = A.model;
   sel.addEventListener('change', () => {
@@ -278,6 +295,13 @@ export function initAi(h) {
     saveSet();
   });
   $('#ai-token').value = loadToken();
+  const srv = $('#ai-server');
+  srv.value = A.server || AI_SERVER;
+  if (AI_SERVER) srv.placeholder = AI_SERVER;
+  srv.addEventListener('change', () => { A.server = srv.value.trim() === AI_SERVER ? '' : srv.value.trim(); saveSet(); checkServer(); });
+  $('#ai-code').value = loadCode();
+  $('#ai-code').addEventListener('change', () => { storeCode($('#ai-code').value.trim()); syncConn(); });
+  $('#ai-check').onclick = () => checkServer(true);
   $('#ai-token').addEventListener('input', syncConn);
   $('#ai-remember').addEventListener('change', () => storeToken($('#ai-token').value.trim()));
   $('#ai-forget').onclick = () => {
@@ -287,15 +311,41 @@ export function initAi(h) {
   $('#ai-show').onclick = () => { const t = $('#ai-token'); t.type = t.type === 'password' ? 'text' : 'password'; };
 
   function syncConn() {
-    const ok = !!$('#ai-token').value.trim() && (A.project.trim() || A.auth === 'key' || A.base.trim());
-    $('#ai-conn-state').textContent = ok ? '연결 준비됨' : '설정 필요';
+    let ok, label;
+    if (useServer()) {
+      ok = !!serverInfo?.ok && (!serverInfo.needsCode || !!$('#ai-code').value.trim());
+      label = !serverInfo ? '서버 확인 중…' : serverInfo.error ? '서버 연결 안 됨' : !serverInfo.ok ? '서버 설정 필요' : ok ? '서버 연결됨' : '접속 코드 필요';
+    } else {
+      ok = !!$('#ai-token').value.trim() && (A.project.trim() || A.auth === 'key');
+      label = ok ? '토큰으로 직접 연결' : '서버 주소 필요';
+    }
+    $('#ai-conn-state').textContent = label;
     $('#ai-conn-state').classList.toggle('ok', !!ok);
+    $('#ai-code-row').hidden = useServer() && serverInfo && !serverInfo.error && !serverInfo.needsCode;
+    $('#ai-direct').classList.toggle('off', useServer());
     $('#ai-token-label').firstChild.textContent = A.auth === 'key' ? 'API 키 ' : '액세스 토큰 ';
     $('#ai-auth-help').hidden = A.auth !== 'token';
     $('#ai-key-help').hidden = A.auth !== 'key';
   }
-  syncChips(); syncConn(); syncAspectHint();
-  if (!$('#ai-token').value) $('#ai-conn').open = true;
+  async function checkServer(loud = false) {
+    serverInfo = null; syncConn();
+    if (!useServer()) { syncConn(); if (!$('#ai-token').value) $('#ai-conn').open = true; return; }
+    try {
+      const r = await fetch(`${serverUrl()}/health`);
+      serverInfo = await r.json();
+      if (!r.ok) serverInfo = { error: serverInfo?.error?.message || r.status };
+    } catch (e) { serverInfo = { error: e.message || 'fail' }; }
+    syncConn();
+    const good = serverInfo.ok && !serverInfo.error && (!serverInfo.needsCode || $('#ai-code').value.trim());
+    if (!good) $('#ai-conn').open = true;
+    if (loud) {
+      if (serverInfo.error) hooks.toast(`AI 서버에 연결하지 못했어요: ${serverInfo.error}`, 5000);
+      else if (!serverInfo.ok) hooks.toast('서버는 켜져 있는데 GCP_SA_KEY(또는 VERTEX_API_KEY)가 설정되지 않았어요.', 5000);
+      else hooks.toast(`AI 서버 연결됨 · 모델 ${serverInfo.models.join(', ')}${serverInfo.needsCode ? ' · 접속 코드 필요' : ''}`);
+    }
+  }
+  syncChips(); syncAspectHint();
+  checkServer();
 
   // 그림 넣기
   const d = $('#ai-drop'), inp = $('input', d);

@@ -1,0 +1,13 @@
+name = "seol-gif-ai"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# 비밀이 아닌 설정만 여기에 둡니다.
+# 토큰(GCP_SA_KEY)과 접속 코드(ACCESS_CODE)는 절대 여기 쓰지 말고
+#   npx wrangler secret put GCP_SA_KEY < 키.json
+#   npx wrangler secret put ACCESS_CODE
+# 로 넣으세요.
+[vars]
+ALLOWED_ORIGINS = "https://s2ndrome.github.io"
+GCP_LOCATION = "us-central1"
+ALLOWED_MODELS = "veo-3.1-fast-generate-001,veo-3.1-generate-001"

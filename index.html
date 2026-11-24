@@ -109,24 +109,30 @@
         <p class="muted">1080p는 모델에 따라 8초에서만 될 수 있어요. GIF로 만들 거면 720p · 소리 끔이 빠르고 충분해요.</p>
       </details>
       <details class="box" id="ai-conn">
-        <summary>Vertex AI 연결 <small id="ai-conn-state">설정 필요</small></summary>
-        <div class="grid2">
-          <label class="f">프로젝트 ID<input type="text" id="ai-project" placeholder="my-project-123" autocomplete="off" spellcheck="false"></label>
-          <label class="f">지역<input type="text" id="ai-location" placeholder="us-central1" autocomplete="off" spellcheck="false"></label>
-        </div>
-        <label class="f">인증 방식
-          <select id="ai-auth">
-            <option value="token">액세스 토큰 (OAuth · gcloud)</option>
-            <option value="key">API 키</option>
-          </select>
-        </label>
-        <label class="f" id="ai-token-label">액세스 토큰 <input type="password" id="ai-token" autocomplete="off" spellcheck="false" placeholder="ya29.…"></label>
-        <div class="btn-row"><button class="btn" id="ai-show">보기 / 숨기기</button><button class="btn" id="ai-forget">토큰 지우기</button></div>
-        <div class="checks"><label><input type="checkbox" id="ai-remember"> 이 브라우저에 기억하기 <small>(끄면 탭을 닫을 때 지워져요)</small></label></div>
-        <p class="muted" id="ai-auth-help">터미널에서 <code>gcloud auth print-access-token</code> 으로 받은 값을 넣어주세요. 1시간이 지나면 만료돼서 다시 받아야 해요.</p>
-        <p class="muted" id="ai-key-help" hidden>Vertex AI용 API 키를 넣어주세요. 키 종류에 따라 Veo가 안 될 수도 있어요. 안 되면 액세스 토큰을 써주세요.</p>
-        <p class="muted">토큰은 이 브라우저에서 Google(aiplatform.googleapis.com)로만 바로 가요. 이 사이트나 다른 곳으로는 보내지 않아요. 남의 컴퓨터에서는 '기억하기'를 끄세요.</p>
-        <label class="f">주소 직접 지정 <small>(고급 · 프록시를 쓸 때만)</small><input type="text" id="ai-base" placeholder="비워두면 Google에 바로 연결" autocomplete="off" spellcheck="false"></label>
+        <summary>AI 서버 <small id="ai-conn-state">확인 중…</small></summary>
+        <label class="f">서버 주소<input type="text" id="ai-server" placeholder="https://seol-gif-ai.이름.workers.dev" autocomplete="off" spellcheck="false" inputmode="url"></label>
+        <label class="f" id="ai-code-row">접속 코드 <small>(서버에 정해둔 비밀번호 · 이 브라우저에 기억돼요)</small><input type="password" id="ai-code" autocomplete="off" spellcheck="false"></label>
+        <div class="btn-row"><button class="btn" id="ai-check">연결 확인</button></div>
+        <p class="muted">Vertex AI 토큰은 이 서버(Cloudflare Worker)에만 비밀로 들어 있어요. 페이지와 저장소에는 토큰이 없어요. 서버 만드는 법은 저장소의 <code>server/README.md</code>를 봐주세요.</p>
+        <details class="sub" id="ai-direct">
+          <summary>고급 · 서버 없이 내 토큰으로 직접 연결</summary>
+          <p class="muted">서버 주소를 비워야 이 방식이 쓰여요.</p>
+          <div class="grid2">
+            <label class="f">프로젝트 ID<input type="text" id="ai-project" placeholder="my-project-123" autocomplete="off" spellcheck="false"></label>
+            <label class="f">지역<input type="text" id="ai-location" placeholder="us-central1" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <label class="f">인증 방식
+            <select id="ai-auth">
+              <option value="token">액세스 토큰 (OAuth · gcloud)</option>
+              <option value="key">API 키</option>
+            </select>
+          </label>
+          <label class="f" id="ai-token-label">액세스 토큰 <input type="password" id="ai-token" autocomplete="off" spellcheck="false" placeholder="ya29.…"></label>
+          <div class="btn-row"><button class="btn" id="ai-show">보기 / 숨기기</button><button class="btn" id="ai-forget">토큰 지우기</button></div>
+          <div class="checks"><label><input type="checkbox" id="ai-remember"> 이 브라우저에 기억하기</label></div>
+          <p class="muted" id="ai-auth-help"><code>gcloud auth print-access-token</code> 으로 받은 값 (1시간 유효).</p>
+          <p class="muted" id="ai-key-help" hidden>Vertex AI용 API 키. 키 종류에 따라 Veo가 안 될 수도 있어요.</p>
+        </details>
       </details>
       <button class="primary big" id="ai-go">AI로 영상 만들기</button>
       <div class="size-est" id="ai-status" hidden></div>
@@ -413,8 +419,8 @@
       <div class="qa"><p class="qa-q">색이 뭉개지거나 계단처럼 보여요.</p><p class="qa-a">GIF는 한 장에 최대 256색만 쓸 수 있어요. 디더링을 올리면 부드러워지고, 팔레트를 '하나로 통일'로 바꾸면 프레임 사이 색 떨림이 줄어요.</p></div>
       <div class="qa"><p class="qa-q">영상이 안 열려요.</p><p class="qa-a">브라우저가 재생할 수 있는 영상(mp4 H.264, webm 등)이어야 해요. 아이폰의 HEVC(.mov) 영상은 크롬에서 안 열릴 수 있으니 사파리를 쓰거나 '호환성 우선'으로 찍은 영상을 넣어주세요.</p></div>
       <div class="qa"><p class="qa-q">저장이 오래 걸려요.</p><p class="qa-a">프레임 하나하나를 영상에서 꺼내 다시 그리기 때문에 길이 × 초당 프레임만큼 시간이 걸려요. 저장 중엔 이 탭을 열어두세요.</p></div>
-      <div class="qa"><p class="qa-q">AI 영상은 어떻게 만들어요?</p><p class="qa-a">'AI 영상' 탭에 그림을 넣고 어떻게 움직일지 적은 뒤, Google Cloud 프로젝트 ID와 Vertex AI 토큰을 넣고 만들면 돼요. 1~3분 뒤 영상이 나오면 '이 영상으로 GIF 만들기'를 눌러 바로 GIF로 저장할 수 있어요.</p></div>
-      <div class="qa"><p class="qa-q">토큰이 안전한가요?</p><p class="qa-a">토큰은 이 브라우저에서 Google로만 바로 보내요. 이 사이트에는 서버가 없어서 어디에도 저장되지 않아요. '기억하기'를 켜면 이 브라우저에만 남고, '토큰 지우기'로 지울 수 있어요.</p></div>
+      <div class="qa"><p class="qa-q">AI 영상은 어떻게 만들어요?</p><p class="qa-a">'AI 영상' 탭에 그림을 넣고 어떻게 움직일지 적은 뒤 만들면 돼요. AI 서버가 연결돼 있어야 해요. 1~3분 뒤 영상이 나오면 '이 영상으로 GIF 만들기'를 눌러 바로 GIF로 저장할 수 있어요.</p></div>
+      <div class="qa"><p class="qa-q">토큰이 안전한가요?</p><p class="qa-a">토큰은 중계 서버(Cloudflare Worker)에 비밀로만 들어 있고, 페이지·저장소·브라우저에는 없어요. 접속 코드를 정해두면 코드를 아는 사람만 영상을 만들 수 있어요.</p></div>
       <div class="qa"><p class="qa-q">설정이 기억되나요?</p><p class="qa-a">효과·필터·GIF 설정은 이 브라우저에 기억돼요. 영상 파일은 저장되지 않으니 다시 넣어주세요.</p></div>
     </div>
   </div>

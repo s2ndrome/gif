@@ -217,3 +217,11 @@ input[type=checkbox]:checked::after { transform: scale(1); }
 #ai-status { white-space: normal; word-break: break-word; }
 #ai-status[hidden] { display: none; }
 code { font: 400 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--ice); padding: 1px 4px; color: var(--ink); }
+
+.sub { margin-top: 12px; border-top: 1.5px dashed var(--line); padding-top: 4px; }
+.sub > summary { cursor: pointer; padding: 6px 0 2px; font: 700 11px var(--round); color: var(--mid); list-style: none; }
+.sub > summary::-webkit-details-marker { display: none; }
+.sub > summary::before { content: "▸ "; }
+.sub[open] > summary::before { content: "▾ "; }
+.sub.off { opacity: .55; }
+#ai-code-row[hidden] { display: none; }
