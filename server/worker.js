@@ -31,10 +31,10 @@ export default {
     const cors = corsHeaders(allowed ? origin : '');
 
     if (request.method === 'OPTIONS') return new Response(null, { status: allowed ? 204 : 403, headers: cors });
-    if (origin && !allowed) return json({ error: { message: `이 주소(${origin})에서는 쓸 수 없어요. 서버의 ALLOWED_ORIGINS를 확인해주세요.` } }, 403, cors);
+    if (origin && !allowed) return json({ error: { code: 'ORIGIN', origin, message: `이 페이지 주소(${origin})가 서버의 ALLOWED_ORIGINS에 없어요. Cloudflare에서 ALLOWED_ORIGINS를 ${origin} 로 바꿔주세요.` } }, 403, corsHeaders(origin));
 
     try {
-      if (url.pathname === '/health' && request.method === 'GET') {
+      if ((url.pathname === '/health' || url.pathname === '/') && request.method === 'GET') {
         const auth = env.GCP_SA_KEY ? 'service-account' : env.VERTEX_API_KEY ? 'api-key' : 'none';
         // (키 값 자체는 절대 돌려주지 않음)
         return json({
@@ -114,7 +114,8 @@ function vertexUrl(env, project, model, method) {
   return `https://${host}/v1/projects/${encodeURIComponent(project)}/locations/${loc}/publishers/google/models/${model}:${method}`;
 }
 function originAllowed(origin, env) {
-  const list = String(env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+  const list = String(env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)
+    .map((s) => { if (s === '*') return s; try { return new URL(s.includes('://') ? s : `https://${s}`).origin; } catch { return s.replace(/\/+$/, ''); } });
   if (!origin) return true; // 브라우저가 아닌 요청(curl 등) — 접속 코드로 막음
   if (!list.length || list.includes('*')) return true;
   return list.includes(origin);

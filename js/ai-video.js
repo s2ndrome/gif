@@ -333,14 +333,16 @@ export function initAi(h) {
     if (!useServer()) { syncConn(); if (!$('#ai-token').value) $('#ai-conn').open = true; return; }
     try {
       const r = await fetch(`${serverUrl()}/health`);
-      serverInfo = await r.json();
-      if (!r.ok) serverInfo = { error: serverInfo?.error?.message || r.status };
-    } catch (e) { serverInfo = { error: e.message || 'fail' }; }
+      serverInfo = await r.json().catch(() => ({}));
+      if (!r.ok) serverInfo = { error: serverInfo?.error?.message || `서버가 ${r.status} 오류를 냈어요. Cloudflare에 worker.js를 다시 붙여넣고 Deploy 해주세요.` };
+    } catch {
+      serverInfo = { error: `응답을 읽을 수 없어요. ① 새 탭에서 ${serverUrl()}/health 를 열어 "ok":true 가 보이는지 확인해주세요. ② 보이면 Cloudflare의 ALLOWED_ORIGINS를 ${location.origin} 로 바꿔주세요.` };
+    }
     syncConn();
     const good = serverInfo.ok && !serverInfo.error && (!serverInfo.needsCode || $('#ai-code').value.trim());
     if (!good) $('#ai-conn').open = true;
     if (loud) {
-      if (serverInfo.error) hooks.toast(`AI 서버에 연결하지 못했어요: ${serverInfo.error}`, 5000);
+      if (serverInfo.error) hooks.toast(`AI 서버에 연결하지 못했어요. ${serverInfo.error}`, 12000);
       else if (!serverInfo.ok) hooks.toast('서버는 켜져 있는데 GCP_SA_KEY(또는 VERTEX_API_KEY)가 설정되지 않았어요.', 5000);
       else hooks.toast(`AI 서버 연결됨 · 모델 ${serverInfo.models.join(', ')}${serverInfo.needsCode ? ' · 접속 코드 필요' : ''}`);
     }
