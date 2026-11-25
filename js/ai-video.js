@@ -28,6 +28,29 @@ const MOTION_PRESETS = [
 // 줌인 절대 금지: 네거티브에 줌 관련 단어를 겹겹이 + 프롬프트에도 카메라 고정을 강하게 (네거티브만으론 약해서 양쪽에)
 const NOZOOM_NEG = 'zoom in, zooming in, zoom, camera push-in, push in, dolly in, dolly zoom, camera moving closer, camera moving forward, close-up, closer framing, tighter framing, cropping in, enlarging, scaling up, magnification, ken burns effect';
 const NOZOOM_POS = 'IMPORTANT: the camera is completely static and locked off, fixed framing with the exact same composition and size as the image from start to end, absolutely no zoom in, no push-in, no camera movement at all.';
+// 고정(금지) 버튼들: 네거티브에 관련 단어를 겹겹이 + 프롬프트 맨 앞에 IMPORTANT 문장 (네거티브만으론 약해서 양쪽에)
+// block: 켜져 있는 동안 넣을 수 없는 움직임 문구 (켜면 프롬프트에서도 빠짐)
+const LOCKS = [
+  { id: 'zoom', label: '🚫 줌인 절대 금지', name: '줌인 금지', neg: NOZOOM_NEG, pos: NOZOOM_POS, block: /zoom|push-in|camera/i },
+  {
+    id: 'face', label: '🚫 얼굴 고정 (표정 · 고개 움직임 금지)', name: '얼굴 고정',
+    neg: 'changing facial expression, expression change, different expression, smiling, laughing, frowning, crying, blinking, eye movement, eyes moving, looking around, mouth movement, mouth opening, lip movement, talking, speaking, lip sync, head movement, moving head, head tilt, tilting head, head turn, turning head, nodding, head nod, head bob, bobbing head, head shake, face morphing, face distortion',
+    pos: 'IMPORTANT: the face is completely frozen and locked: the exact same facial expression from start to end, absolutely no change of expression, no blinking, no eye movement, no mouth or lip movement; the head stays perfectly still, absolutely no nodding, no tilting, no turning, no head bobbing.',
+    block: /blink|nod|head|face|expression/i,
+  },
+  {
+    id: 'body', label: '🚫 몸 고정 (몸 움직임 금지)', name: '몸 고정',
+    neg: 'body movement, moving body, character moving, pose change, changing pose, different pose, moving torso, moving shoulders, moving arms, raising arms, moving hands, hand movement, finger movement, moving legs, walking, running, dancing, gesturing, shifting weight, breathing motion, chest moving, swaying body, turning body, leaning, bending, body morphing',
+    pos: 'IMPORTANT: the characters\' bodies are completely frozen in the exact same pose from start to end: absolutely no movement of the torso, shoulders, arms, hands, fingers, legs or feet, no breathing motion, no shifting, no gestures. Only the elements explicitly described (such as hair or clothing fabric) may move.',
+    block: /breathe|floating|falling|body/i,
+  },
+  {
+    id: 'bg', label: '🚫 배경 고정 (배경 움직임 금지)', name: '배경 고정',
+    neg: 'moving background, background motion, background movement, background animation, animated background, parallax, shifting background, scrolling background, background change, changing background, moving buildings, moving clouds, moving crowd, moving lights, flickering lights, twinkling lights, changing lighting, light changes',
+    pos: 'IMPORTANT: the background is completely static like a still photograph: absolutely no movement, no parallax, no shifting, no flickering or twinkling lights, nothing in the background changes from start to end.',
+    block: /city lights|background|twinkl/i,
+  },
+];
 const BASE_PROMPT = 'Animate this illustration. Keep the exact art style, characters, faces, colors and composition of the image. Subtle, smooth, natural motion: ';
 
 const SET_KEY = 'seol-gif-ai-v1';
@@ -354,8 +377,9 @@ export function initAi(h) {
     b.textContent = p.name; b.title = p.en;
     b.onclick = () => {
       const ta = $('#ai-prompt');
-      if (!ta.value.includes(p.en) && /zoom|push-in|camera/i.test(p.en) && A.neg.includes(NOZOOM_NEG)) {
-        hooks.toast('줌인 절대 금지가 켜져 있어서 카메라 움직임은 넣을 수 없어요. 먼저 줌인 금지를 꺼주세요.', 4000);
+      const lock = !ta.value.includes(p.en) && LOCKS.find((L) => A.neg.includes(L.neg) && L.block.test(p.en));
+      if (lock) {
+        hooks.toast(`'${lock.name}'이 켜져 있어서 '${p.name}'은 넣을 수 없어요. 먼저 ${lock.name}을 꺼주세요.`, 4000);
         return;
       }
       if (ta.value.includes(p.en)) ta.value = ta.value.replace(new RegExp(`,?\\s*${p.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
@@ -367,26 +391,39 @@ export function initAi(h) {
   }
   const syncChips = () => {
     $$('button', chips).forEach((b) => b.classList.toggle('on', A.prompt.includes(b.title)));
-    $('#ai-nozoom').classList.toggle('on', A.neg.includes(NOZOOM_NEG));
+    $$('#ai-neg-chips button').forEach((b) => { const L = LOCKS.find((x) => x.id === b.dataset.lock); b.classList.toggle('on', A.neg.includes(L.neg)); });
   };
-  // 줌인 절대 금지 버튼
+  // 고정(금지) 버튼들
   const cleanJoin = (t) => t.replace(/\s*,\s*,+/g, ',').replace(/^\s*,\s*|\s*,\s*$/g, '').replace(/\s{2,}/g, ' ').trim();
-  $('#ai-nozoom').onclick = () => {
-    const on = A.neg.includes(NOZOOM_NEG);
-    if (on) {
-      A.neg = cleanJoin(A.neg.replace(NOZOOM_NEG, ''));
-      A.prompt = A.prompt.replace(NOZOOM_POS, '').trim();
-    } else {
-      A.neg = cleanJoin(`${NOZOOM_NEG}, ${A.neg}`);
-      // 줌인 · 카메라 움직임 문구는 빼고, 고정 문구를 맨 앞(가장 강하게)에
-      for (const p of MOTION_PRESETS) if (/zoom|push-in|camera/i.test(p.en)) A.prompt = A.prompt.replace(new RegExp(`,?\\s*${p.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
-      A.prompt = `${NOZOOM_POS} ${A.prompt.replace(/:\s*,\s*/, ': ').replace(/,\s*\./, '.')}`.trim();
-    }
-    $('#ai-neg').value = A.neg; $('#ai-prompt').value = A.prompt;
-    saveSet(); syncChips();
-    hooks.toast(on ? '줌인 금지를 껐어요.' : '줌인 금지: 네거티브와 프롬프트 양쪽에 넣었어요.');
+  const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const lockBox = $('#ai-neg-chips');
+  lockBox.innerHTML = '';
+  for (const L of LOCKS) {
+    const b = document.createElement('button');
+    b.dataset.lock = L.id; b.textContent = L.label;
+    b.title = '네거티브에 관련 단어를 넣고, 프롬프트 맨 앞에도 강하게 적어요';
+    b.onclick = () => {
+      const on = A.neg.includes(L.neg);
+      if (on) {
+        A.neg = cleanJoin(A.neg.replace(L.neg, ''));
+        A.prompt = A.prompt.replace(L.pos, '').replace(/\s{2,}/g, ' ').trim();
+      } else {
+        A.neg = cleanJoin(`${L.neg}, ${A.neg}`);
+        // 막히는 움직임 문구는 빼고, 고정 문장을 맨 앞(가장 강하게)에
+        for (const p of MOTION_PRESETS) if (L.block.test(p.en)) A.prompt = A.prompt.replace(new RegExp(`,?\\s*${escRe(p.en)}`), '');
+        A.prompt = `${L.pos} ${A.prompt.replace(/:\s*,\s*/, ': ').replace(/,\s*\./, '.').replace(/:\s*\./, ':')}`.trim();
+      }
+      $('#ai-neg').value = A.neg; $('#ai-prompt').value = A.prompt;
+      saveSet(); syncChips();
+      hooks.toast(on ? `${L.name}을 껐어요.` : `${L.name}: 네거티브와 프롬프트 양쪽에 넣었어요.`);
+    };
+    lockBox.appendChild(b);
+  }
+  $('#ai-reset-prompt').onclick = () => {
+    // 켜져 있는 고정 문장은 그대로 두고 나머지만 기본 문구로
+    const keep = LOCKS.filter((L) => A.neg.includes(L.neg)).map((L) => L.pos).join(' ');
+    A.prompt = `${keep} ${DEF().prompt}`.trim(); $('#ai-prompt').value = A.prompt; saveSet(); syncChips();
   };
-  $('#ai-reset-prompt').onclick = () => { A.prompt = (A.neg.includes(NOZOOM_NEG) ? `${NOZOOM_POS} ` : '') + DEF().prompt; $('#ai-prompt').value = A.prompt; saveSet(); syncChips(); };
 
   // 입력칸 ↔ 상태
   const bind = (id, key, ev = 'input', parse = (v) => v) => {
