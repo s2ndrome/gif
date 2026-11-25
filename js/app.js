@@ -119,7 +119,93 @@ function syncVideo(t, hard = false) {
     if (vid.paused) vid.play().catch(() => {});
   } else {
     if (!vid.paused) vid.pause();
+    if (cacheReady()) return; // 미리 모아둔 프레임으로 보여줌
     if (!vid.seeking && Math.abs(vid.currentTime - target) > 0.03) vid.currentTime = target;
+  }
+}
+
+// ───────── 거꾸로 · 부메랑 미리보기: 구간 프레임을 한 번 모아두기 ─────────
+// mp4(H.264)는 뒤로 되감기가 느려서, 재생 중 매번 되감으면 화면이 검게 나옴.
+// 구간을 한 번 앞으로 재생하며 프레임을 모아 두고, 거꾸로 구간은 그걸 보여줌.
+const fc = { key: '', ver: 0, ready: false, building: false, frames: [], fps: 0, a: 0 };
+const fcKey = () => { const { a, b } = clipRange(); return `${media.id}|${a.toFixed(2)}|${b.toFixed(2)}|${pv.width}x${pv.height}`; };
+const cacheReady = () => fc.ready && fc.key === fcKey();
+function dropCache() { fc.ver++; fc.frames.forEach((f) => f && f.close && f.close()); Object.assign(fc, { key: '', ready: false, building: false, frames: [] }); revStatus(); }
+function revStatus() {
+  const el = $('#rev-status');
+  if (el) el.textContent = media.ok && S.clip.dir !== 'fwd' ? (fc.building ? '· 거꾸로 재생 준비 중…' : '') : '';
+}
+let fcT = 0;
+function scheduleFrameCache() {
+  clearTimeout(fcT);
+  if (!media.ok || S.clip.dir === 'fwd') { revStatus(); return; }
+  if (fc.key === fcKey() && (fc.ready || fc.building)) return;
+  fc.building = true; revStatus();
+  fcT = setTimeout(buildFrameCache, 250);
+}
+async function buildFrameCache() {
+  if (!media.ok || S.clip.dir === 'fwd') return;
+  const key = fcKey();
+  dropCache();
+  const ver = fc.ver;
+  Object.assign(fc, { key, building: true }); revStatus();
+  const { a, b, L } = clipRange();
+  const fps = clamp(Math.floor(200 / L), 6, 30); // 많아도 200장 정도
+  const N = Math.max(2, Math.ceil(L * fps) + 1);
+  const src = media.crop || { x: 0, y: 0, w: media.w, h: media.h };
+  const s = Math.min(1, Math.max(pv.width / src.w, pv.height / src.h) * 1.35);
+  const bw = Math.max(2, Math.round(src.w * s)), bh = Math.max(2, Math.round(src.h * s));
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = media.url;
+  const frames = new Array(N).fill(null);
+  const alive = () => ver === fc.ver;
+  const grab = (time) => {
+    const i = Math.round((time - a) * fps);
+    if (i < 0 || i >= N || frames[i]) return null;
+    frames[i] = 'pending';
+    return createImageBitmap(v, src.x, src.y, src.w, src.h, { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'medium' })
+      .then((bm) => { if (alive()) frames[i] = bm; else bm.close(); }).catch(() => { frames[i] = null; });
+  };
+  try {
+    await new Promise((r, j) => { v.onloadeddata = r; v.onerror = j; });
+    await seekVideo(v, a);
+    const jobs = [grab(v.currentTime)];
+    if ('requestVideoFrameCallback' in v) {
+      // 앞으로 재생하면서 지나가는 프레임을 모음 (되감기보다 훨씬 빠름)
+      v.playbackRate = 2;
+      await new Promise((res) => {
+        const cb = (now, meta) => {
+          if (!alive()) return res();
+          jobs.push(grab(meta.mediaTime));
+          if (meta.mediaTime >= b - 0.02 || v.ended) return res();
+          v.requestVideoFrameCallback(cb);
+        };
+        v.requestVideoFrameCallback(cb);
+        v.onended = res;
+        v.play().catch(res);
+        setTimeout(res, (L / 2) * 1000 + 8000);
+      });
+      v.pause();
+    }
+    await Promise.all(jobs);
+    // 빠진 칸은 직접 찾아가서 채움 (너무 많으면 가까운 프레임으로)
+    let miss = frames.reduce((n, f) => n + (f ? 0 : 1), 0);
+    for (let i = 0; i < N && alive() && miss && miss <= Math.max(12, N * 0.5); i++) {
+      if (frames[i]) continue;
+      await seekVideo(v, Math.min(b, a + i / fps));
+      await grab(Math.min(b, a + i / fps));
+    }
+    if (!alive()) return;
+    let last = frames.find((f) => f && f !== 'pending') || null;
+    for (let i = 0; i < N; i++) { if (frames[i] && frames[i] !== 'pending') last = frames[i]; else frames[i] = last; }
+    if (!last) throw new Error('no frames');
+    Object.assign(fc, { ready: true, building: false, frames, fps, a });
+  } catch (e) {
+    console.warn('frame cache', e);
+    if (alive()) Object.assign(fc, { ready: false, building: false });
+  } finally {
+    v.removeAttribute('src'); v.load();
+    if (alive()) { revStatus(); redraw(); }
   }
 }
 vid.addEventListener('seeked', () => redraw());
@@ -128,6 +214,7 @@ function settingsChangedTiming() {
   if (player.playing) seek(player.pos); else parkVideo();
   updateTrimUI();
   scheduleEstimate();
+  scheduleFrameCache();
 }
 
 // ───────── 영상 넣기 ─────────
@@ -181,10 +268,13 @@ function videoChanged() {
   $('#empty').hidden = media.ok;
   thumbKey = null;
   presetThumbs();
+  lastImg = null;
+  dropCache();
   updateTrimUI();
   sizeCanvas();
   parkVideo();
   scheduleEstimate();
+  scheduleFrameCache();
 }
 
 // 구간 고르기용 필름 띠
@@ -267,6 +357,7 @@ function sizeCanvas() {
   showEstimate();
   renderSummary();
   redraw();
+  scheduleFrameCache(); // 미리보기 크기가 바뀌면 프레임도 그 크기로
 }
 function colorVals() {
   const v = {};
@@ -283,6 +374,7 @@ function scene(dur) {
   };
 }
 let dirty = true;
+let lastImg = null; // 영상이 되감기 중일 때 보여줄 마지막 화면
 const redraw = () => { dirty = true; };
 
 function frame() {
@@ -297,7 +389,16 @@ function frame() {
     dirty = false;
     const t = clamp(position(), 0, Math.max(0, dur - 1e-3));
     const sc = { ...scene(dur), noFade: !player.playing };
-    if (media.ok && vid.readyState >= 2) sc.img = prepareFrame(vid, media.w, media.h, colorVals(), pv.width, pv.height, 'pv', media.crop);
+    if (media.ok) {
+      const vt = vtime(t);
+      if (S.clip.dir !== 'fwd' && cacheReady()) {
+        const bm = fc.frames[clamp(Math.round((vt - fc.a) * fc.fps), 0, fc.frames.length - 1)];
+        lastImg = prepareFrame(bm, bm.width, bm.height, colorVals(), pv.width, pv.height, 'pv');
+      } else if (vid.readyState >= 2 && !vid.seeking) {
+        lastImg = prepareFrame(vid, media.w, media.h, colorVals(), pv.width, pv.height, 'pv', media.crop);
+      } else if (!lastImg) dirty = true; // 아직 첫 화면 전: 다음에 다시
+      sc.img = lastImg;
+    }
     drawFrame(pvx, pv.width, pv.height, t, sc, null);
     if (S.tab !== 'ai') layerUI.drawSelection(pvx, pv.width, pv.height);
     $('#seek').max = dur.toFixed(2);
